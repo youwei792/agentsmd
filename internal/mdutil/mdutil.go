@@ -3,6 +3,7 @@
 package mdutil
 
 import (
+	"path/filepath"
 	"regexp"
 	"strings"
 )
@@ -21,6 +22,7 @@ type ShellCommand struct {
 	File   string // document path (as given to Parse)
 	Line   int    // 1-based line number
 	Source string // "fence" or "inline"
+	Dir    string // active `cd` target within the same fenced block, if any
 }
 
 // PathRef is a backticked token that looks like a file path.
@@ -100,6 +102,10 @@ func Parse(file, content string) ([]CodeBlock, []ShellCommand, []PathRef) {
 
 		// Outside fences: inline backtick references.
 		for _, tok := range inlineBackticks(raw) {
+			tok = cleanInlineToken(tok)
+			if tok == "" {
+				continue
+			}
 			if isCandidateCommand(tok) {
 				cmds = append(cmds, ShellCommand{Cmd: tok, File: file, Line: ln, Source: "inline"})
 			} else if looksLikePath(tok) {
@@ -120,15 +126,38 @@ func Parse(file, content string) ([]CodeBlock, []ShellCommand, []PathRef) {
 		if !shellLangs[info] {
 			continue
 		}
+		// Track `cd X` state across lines of the same block so that
+		//   cd ui-tui
+		//   npm run dev
+		// resolves "npm run dev" against ui-tui/, not the repo root.
+		curDir := ""
 		for j, raw := range b.RawLines {
 			cmd, ok := cleanCommand(raw, info)
 			if !ok {
 				continue
 			}
-			cmds = append(cmds, ShellCommand{Cmd: cmd, File: file, Line: b.StartLn + 1 + j, Source: "fence"})
+			if t := cdTarget(cmd); t != "" {
+				if t == "-" || t == ".." || strings.HasPrefix(t, "/") || strings.HasPrefix(t, "~") {
+					curDir = ""
+				} else {
+					curDir = filepath.ToSlash(filepath.Join(filepath.ToSlash(curDir), t))
+				}
+				continue // cd lines themselves need no validation
+			}
+			cmds = append(cmds, ShellCommand{Cmd: cmd, File: file, Line: b.StartLn + 1 + j, Source: "fence", Dir: curDir})
 		}
 	}
 	return blocks, cmds, paths
+}
+
+// cdTarget extracts the directory from a pure `cd X` command, or "" when
+// the line is something else (cd in a pipeline is left for checkSegment).
+func cdTarget(cmd string) string {
+	f := strings.Fields(cmd)
+	if len(f) == 2 && f[0] == "cd" {
+		return strings.Trim(f[1], `"'`)
+	}
+	return ""
 }
 
 // cleanCommand strips prompts/comments and decides if a fenced line is a
@@ -198,8 +227,36 @@ func isCandidateCommand(tok string) bool {
 	return false
 }
 
-var pathExtRe = regexp.MustCompile(`\.(md|txt|json|ya?ml|toml|ini|cfg|ts|tsx|js|jsx|mjs|cjs|go|py|rs|rb|java|kt|swift|c|h|cpp|hpp|cs|php|sh|bash|zsh|fish|sql|html|css|scss|vue|svelte|proto|tf|hcl|env|lock|sum|mod|toml)$`)
+var pathExtRe = regexp.MustCompile(`\.(md|txt|json|ya?ml|toml|ini|cfg|ts|tsx|js|jsx|mjs|cjs|go|py|rs|rb|java|kt|swift|c|h|cpp|hpp|cs|php|sh|bash|zsh|fish|sql|html|css|scss|vue|svelte|proto|tf|hcl|env|lock|sum|mod)$`)
 var envFileRe = regexp.MustCompile(`^\.env(\.\w+)?$`)
+var placeholderRe = regexp.MustCompile(`<[\w][\w ./-]*>`)
+
+// conceptualFileNames are agent-instruction files that docs mention
+// conceptually ("the CLAUDE.md of this project") far more often than they
+// reference as an existing path. A missing one is not a finding.
+var conceptualFileNames = map[string]bool{
+	"AGENTS.md": true, "CLAUDE.md": true, "GEMINI.md": true,
+	".cursorrules": true, "copilot-instructions.md": true,
+}
+
+// cleanInlineToken normalizes an inline backtick token. Returns "" when the
+// token is punctuation noise (markdown tables/lists leave marks inside
+// backticks) or a bare file extension (".ts" in a prose table is a type).
+func cleanInlineToken(tok string) string {
+	tok = strings.TrimRight(tok, ")],.;:")
+	tok = strings.TrimLeft(tok, "([")
+	tok = strings.TrimSpace(tok)
+	if len(tok) >= 2 && (tok[0] == tok[len(tok)-1]) && (tok[0] == '"' || tok[0] == '\'') {
+		tok = tok[1 : len(tok)-1]
+	}
+	if strings.Trim(tok, ".") == "" {
+		return ""
+	}
+	if strings.HasPrefix(tok, ".") && !strings.ContainsAny(tok, "/\\ ") && len(tok) <= 6 {
+		return "" // bare extension like ".ts"
+	}
+	return tok
+}
 
 // looksLikePath reports whether a backticked token is probably a file path.
 func looksLikePath(tok string) bool {
@@ -211,6 +268,9 @@ func looksLikePath(tok string) bool {
 	}
 	if strings.HasPrefix(tok, "@") {
 		return false
+	}
+	if placeholderRe.MatchString(tok) {
+		return false // template reference, not a literal path
 	}
 	if strings.Contains(tok, "/") {
 		return true

@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 
 	"github.com/youwei792/agentsmd/internal/analyze"
@@ -37,21 +38,29 @@ type Engine struct {
 	Root  string
 	Facts *analyze.Facts
 
-	// caches
-	pkgJSON     *map[string]string // script name -> cmdline (nil = not loaded)
-	pkgDeps     *map[string]bool   // dependency names (nil = not loaded)
-	pkgLoc      string
-	makeTargets map[string]string // target -> makefile path
-	justRecipes map[string]string
+	// source is the origin of the command currently being checked
+	// ("fence" or "inline"); inline tokens get the most conservative
+	// treatment because they lack surrounding context.
+	source string
+	// subDir is the active `cd` target from the same fenced block; script,
+	// makefile and justfile lookups prefer it over the repo root.
+	subDir string
+
+	// caches, keyed by the active subDir where relevant
+	pkgCache   map[string]*pkgInfo
+	makeCache  map[string]map[string]string
+	justCache  map[string]map[string]string
+	buildNameC *string // module/crate/package base name (nil = not loaded)
 }
 
 // NewEngine builds an Engine with lazily loaded caches.
 func NewEngine(root string, facts *analyze.Facts) *Engine {
 	return &Engine{
-		Root:        root,
-		Facts:       facts,
-		makeTargets: map[string]string{},
-		justRecipes: map[string]string{},
+		Root:      root,
+		Facts:     facts,
+		pkgCache:  map[string]*pkgInfo{},
+		makeCache: map[string]map[string]string{},
+		justCache: map[string]map[string]string{},
 	}
 }
 
@@ -61,8 +70,15 @@ func (e *Engine) CheckDocument(file, content string) []Finding {
 	_, cmds, paths := mdutil.Parse(file, content)
 
 	for _, c := range cmds {
-		out = append(out, e.CheckCommand(file, c.Line, c.Cmd)...)
+		e.source = c.Source
+		e.subDir = ""
+		if c.Dir != "" && e.dirExists(c.Dir) {
+			e.subDir = c.Dir
+		}
+		out = append(out, e.checkCommandSource(file, c.Line, c.Cmd, c.Source)...)
 	}
+	e.source = "fence"
+	e.subDir = ""
 	for _, p := range paths {
 		out = append(out, e.checkPathRef(p)...)
 	}
@@ -76,14 +92,65 @@ var placeholderRe = regexp.MustCompile(`<[\w][\w ./-]*>`)
 
 // CheckCommand validates one command line (possibly a pipeline).
 func (e *Engine) CheckCommand(file string, line int, cmd string) []Finding {
+	return e.checkCommandSource(file, line, cmd, "fence")
+}
+
+func (e *Engine) checkCommandSource(file string, line int, cmd, source string) []Finding {
 	if placeholderRe.MatchString(cmd) {
 		return nil
 	}
 	var out []Finding
 	for _, seg := range mdutil.SplitPipeline(cmd) {
+		e.source = source
 		out = append(out, e.checkSegment(file, line, cmd, seg)...)
 	}
 	return out
+}
+
+// buildName returns the base name of the repo's primary build target
+// (Go module / crate / package name), or the directory name. A doc that
+// runs "./<name>" after a build step is running a build artifact.
+func (e *Engine) buildName() string {
+	if e.buildNameC != nil {
+		return *e.buildNameC
+	}
+	name := ""
+	if b, err := os.ReadFile(filepath.Join(e.Root, "go.mod")); err == nil {
+		for _, line := range strings.Split(string(b), "\n") {
+			t := strings.TrimSpace(line)
+			if strings.HasPrefix(t, "module ") {
+				parts := strings.Split(strings.TrimSpace(strings.TrimPrefix(t, "module ")), "/")
+				name = parts[len(parts)-1]
+				break
+			}
+		}
+	}
+	if name == "" {
+		if b, err := os.ReadFile(filepath.Join(e.Root, "Cargo.toml")); err == nil {
+			s := string(b)
+			if i := strings.Index(s, "name = \""); i >= 0 {
+				rest := s[i+len("name = \""):]
+				if k := strings.Index(rest, "\""); k >= 0 {
+					name = rest[:k]
+				}
+			}
+		}
+	}
+	if name == "" {
+		if b, err := os.ReadFile(filepath.Join(e.Root, "package.json")); err == nil {
+			var pj struct {
+				Name string `json:"name"`
+			}
+			if json.Unmarshal(b, &pj) == nil {
+				name = pj.Name
+			}
+		}
+	}
+	if name == "" {
+		name = filepath.Base(e.Root)
+	}
+	e.buildNameC = &name
+	return name
 }
 
 func (e *Engine) checkSegment(file string, line int, full, seg string) []Finding {
@@ -104,8 +171,27 @@ func (e *Engine) checkSegment(file string, line int, full, seg string) []Finding
 		}
 		return nil
 	}
-	// ./script.sh or ./gradlew
+	// ./script.sh or ./gradlew or ./built-binary
 	if strings.HasPrefix(first, "./") {
+		rest := strings.TrimPrefix(first, "./")
+		if rest == "" {
+			return nil
+		}
+		// Inline backticked "./lib" style tokens are usually shorthand for a
+		// local directory in a subdirectory's context — stay silent.
+		if e.source == "inline" && !strings.Contains(rest, "/") {
+			return nil
+		}
+		// "./ollama serve" after a build step: the binary matching the
+		// module/package name is a build artifact, not a missing file.
+		if !strings.Contains(rest, "/") && rest == e.buildName() {
+			return nil
+		}
+		// Runtime discovery dirs documented with "./.foo/" rarely exist in a
+		// fresh clone by design (agent state, plugin dirs).
+		if strings.HasSuffix(rest, "/") && strings.HasPrefix(rest, ".") {
+			return nil
+		}
 		if !e.relExists(first) {
 			return []Finding{{File: file, Line: line, Level: Error, Command: full,
 				Message: first + " does not exist in the repository"}}
@@ -307,39 +393,71 @@ func suggestScript(scripts map[string]string, name string) string {
 	return best
 }
 
-func (e *Engine) loadScripts() (map[string]string, string) {
-	if e.pkgJSON != nil {
-		return *e.pkgJSON, e.pkgLoc
+// candidatePaths returns the paths to try for a root-level config file,
+// honoring the active `cd` target of the enclosing fenced block.
+func (e *Engine) candidatePaths(name string) []string {
+	if e.subDir != "" {
+		return []string{filepath.Join(e.subDir, name), name}
 	}
-	scripts := map[string]string{}
-	loc := ""
-	// Prefer root package.json; fall back to the shallowest nested one.
-	candidates := []string{filepath.Join(e.Root, "package.json")}
-	if _, err := os.Stat(candidates[0]); err != nil {
-		for _, p := range analyze.FindFiles(e.Root, "package.json") {
+	return []string{name}
+}
+
+// pkgInfo is the parsed package.json for one working directory.
+type pkgInfo struct {
+	scripts map[string]string
+	deps    map[string]bool
+	loc     string
+}
+
+func (e *Engine) loadScripts() (map[string]string, string) {
+	if pi, ok := e.pkgCache[e.subDir]; ok {
+		return pi.scripts, pi.loc
+	}
+	pi := e.parsePkg()
+	if e.pkgCache == nil {
+		e.pkgCache = map[string]*pkgInfo{}
+	}
+	e.pkgCache[e.subDir] = pi
+	return pi.scripts, pi.loc
+}
+
+func (e *Engine) parsePkg() *pkgInfo {
+	pi := &pkgInfo{scripts: map[string]string{}}
+	// The package.json matching the fenced block's `cd` target wins first,
+	// then the repo root, then the shallowest nested one.
+	var candidates []string
+	if e.subDir != "" {
+		candidates = append(candidates, filepath.Join(e.subDir, "package.json"))
+	}
+	candidates = append(candidates, "package.json")
+	if _, err := os.Stat(filepath.Join(e.Root, "package.json")); err != nil {
+		nested := analyze.FindFiles(e.Root, "package.json")
+		sort.Slice(nested, func(i, j int) bool {
+			return strings.Count(nested[i], "/") < strings.Count(nested[j], "/")
+		})
+		for _, p := range nested {
 			if strings.HasPrefix(p, "node_modules") {
 				continue
 			}
-			candidates = append(candidates, filepath.Join(e.Root, p))
+			candidates = append(candidates, p)
 			break
 		}
 	}
 	for _, c := range candidates {
-		b, err := os.ReadFile(c)
+		b, err := os.ReadFile(filepath.Join(e.Root, filepath.FromSlash(c)))
 		if err != nil {
 			continue
 		}
 		var pj struct {
-			Scripts        map[string]string `json:"scripts"`
-			Dependencies   map[string]string `json:"dependencies"`
-			DevDeps        map[string]string `json:"devDependencies"`
-			PeerDeps       map[string]string `json:"peerDependencies"`
-			OptionalDeps   map[string]string `json:"optionalDependencies"`
+			Scripts      map[string]string `json:"scripts"`
+			Dependencies map[string]string `json:"dependencies"`
+			DevDeps      map[string]string `json:"devDependencies"`
+			PeerDeps     map[string]string `json:"peerDependencies"`
+			OptionalDeps map[string]string `json:"optionalDependencies"`
 		}
 		if json.Unmarshal(b, &pj) == nil && len(pj.Scripts) > 0 {
-			scripts = pj.Scripts
-			rel, _ := filepath.Rel(e.Root, c)
-			loc = filepath.ToSlash(rel)
+			pi.scripts = pj.Scripts
+			pi.loc = c
 			deps := map[string]bool{}
 			for _, m := range []map[string]string{pj.Dependencies, pj.DevDeps, pj.PeerDeps, pj.OptionalDeps} {
 				for name := range m {
@@ -351,23 +469,26 @@ func (e *Engine) loadScripts() (map[string]string, string) {
 					}
 				}
 			}
-			e.pkgDeps = &deps
+			pi.deps = deps
 			break
 		}
 	}
-	e.pkgJSON = &scripts
-	e.pkgLoc = loc
-	return scripts, loc
+	return pi
 }
 
 func (e *Engine) loadDeps() map[string]bool {
-	if e.pkgDeps == nil {
-		e.loadScripts()
+	pi, ok := e.pkgCache[e.subDir]
+	if !ok {
+		pi = e.parsePkg()
+		if e.pkgCache == nil {
+			e.pkgCache = map[string]*pkgInfo{}
+		}
+		e.pkgCache[e.subDir] = pi
 	}
-	if e.pkgDeps == nil {
+	if pi.deps == nil {
 		return map[string]bool{}
 	}
-	return *e.pkgDeps
+	return pi.deps
 }
 
 func (e *Engine) checkMake(fields []string, file string, line int, full string) []Finding {
@@ -393,19 +514,33 @@ func (e *Engine) checkMake(fields []string, file string, line int, full string) 
 }
 
 func (e *Engine) loadMake() map[string]string {
-	if len(e.makeTargets) > 0 {
-		return e.makeTargets
+	if targets, ok := e.makeCache[e.subDir]; ok {
+		return targets
 	}
-	for _, name := range []string{"Makefile", "makefile", "GNUmakefile"} {
-		p := filepath.Join(e.Root, name)
-		if b, err := os.ReadFile(p); err == nil {
+	targets := map[string]string{}
+	for _, name := range e.candidatePaths("Makefile") {
+		if b, err := os.ReadFile(filepath.Join(e.Root, filepath.FromSlash(name))); err == nil {
 			for _, t := range extractTargets(string(b)) {
-				e.makeTargets[t] = name
+				targets[t] = name
 			}
 			break
 		}
 	}
-	return e.makeTargets
+	for _, name := range []string{"makefile", "GNUmakefile"} {
+		if len(targets) > 0 {
+			break
+		}
+		for _, p := range e.candidatePaths(name) {
+			if b, err := os.ReadFile(filepath.Join(e.Root, filepath.FromSlash(p))); err == nil {
+				for _, t := range extractTargets(string(b)) {
+					targets[t] = p
+				}
+				break
+			}
+		}
+	}
+	e.makeCache[e.subDir] = targets
+	return targets
 }
 
 func (e *Engine) checkJust(fields []string, file string, line int, full string) []Finding {
@@ -427,19 +562,25 @@ func (e *Engine) checkJust(fields []string, file string, line int, full string) 
 }
 
 func (e *Engine) loadJust() map[string]string {
-	if len(e.justRecipes) > 0 {
-		return e.justRecipes
+	if recipes, ok := e.justCache[e.subDir]; ok {
+		return recipes
 	}
+	recipes := map[string]string{}
 	for _, name := range []string{"justfile", "Justfile", ".justfile"} {
-		p := filepath.Join(e.Root, name)
-		if b, err := os.ReadFile(p); err == nil {
-			for _, t := range extractRecipes(string(b)) {
-				e.justRecipes[t] = name
-			}
+		if len(recipes) > 0 {
 			break
 		}
+		for _, p := range e.candidatePaths(name) {
+			if b, err := os.ReadFile(filepath.Join(e.Root, filepath.FromSlash(p))); err == nil {
+				for _, t := range extractRecipes(string(b)) {
+					recipes[t] = p
+				}
+				break
+			}
+		}
 	}
-	return e.justRecipes
+	e.justCache[e.subDir] = recipes
+	return recipes
 }
 
 func (e *Engine) checkGo(fields []string, file string, line int, full string) []Finding {
@@ -630,13 +771,35 @@ var buildDirs = map[string]bool{
 	"__pycache__": true, "site-packages": true,
 }
 
+// conceptualFileNames are agent-instruction files that docs mention
+// conceptually ("update the CLAUDE.md") far more often than they reference
+// as an existing path. A missing one is not a finding.
+var conceptualFileNames = map[string]bool{
+	"AGENTS.md": true, "CLAUDE.md": true, "GEMINI.md": true,
+	"README.md": true, ".cursorrules": true, "copilot-instructions.md": true,
+}
+
+var envFileRe = regexp.MustCompile(`^\.env(\.\w+)?$`)
+
 func (e *Engine) checkPathRef(p mdutil.PathRef) []Finding {
 	pth := p.Path
 	if strings.HasPrefix(pth, "@") {
 		return nil
 	}
+	// A leading "/" in prose usually means repo-root-relative, not
+	// filesystem-absolute ("/test/e2e/mock/"). Treat it as relative.
+	pth = strings.TrimPrefix(pth, "/")
 	// Skip punctuation noise and protocol-relative URLs ("//cdn...").
 	if strings.Trim(pth, "/.\\") == "" || strings.HasPrefix(pth, "//") {
+		return nil
+	}
+	// Conceptual mentions of agent-instruction files ("update the
+	// CLAUDE.md") are far more common than literal path references.
+	if conceptualFileNames[pth] {
+		return nil
+	}
+	// .env files are typically gitignored but real locally — stay silent.
+	if envFileRe.MatchString(pth) {
 		return nil
 	}
 	if hasGlob(pth) {

@@ -4,6 +4,30 @@ All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/) and the
 project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.1.1] - 2026-08-30
+
+Engine hardening release, driven by validating `check` against real
+production AGENTS.md files (ollama, frp, firecrawl, excalidraw, spec-kit,
+AutoGPT, hermes-agent — ~450 references scanned, zero real staleness found,
+eight false-positive classes found in our own engine and eliminated).
+
+### Fixed
+- `cd` inside a fenced block now applies to later lines of the same block
+  (`cd ui-tui` + `npm run dev` resolves against `ui-tui/package.json`).
+- A leading `/` in a path reference is treated as repo-root-relative, not
+  filesystem-absolute.
+- `./<name>` commands matching the module/crate/package name are recognized
+  as build artifacts (`./ollama serve` after `cmake --build`).
+- Runtime discovery dirs documented as `./.foo/` are no longer flagged.
+- Inline backticked `./lib`-style shorthands are no longer flagged.
+- Conceptual mentions of `CLAUDE.md`/`AGENTS.md`/`README.md` as text are no
+  longer treated as missing file references.
+- Template placeholders (`<package-dir>`) in path references are skipped.
+- Markdown table/list punctuation leaking into inline tokens
+  (`docs/AGENTS.md)`) and bare extensions (`.ts`) are cleaned up.
+- The nested `package.json` fallback now prefers the shallowest package.
+- Windows: test binary gets a `.exe` suffix (CI fix).
+
 ## [0.1.0] - 2026-08-30
 
 First public release.

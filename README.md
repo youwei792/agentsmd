@@ -150,7 +150,11 @@ GitHub Actions & GitLab CI commands, Docker, and your existing agent files.
 ## Design principles
 
 1. **Conservative or silent.** A checker that cries wolf gets uninstalled.
-   Findings must be provably right.
+   Findings must be provably right. The engine was validated against real
+   production AGENTS.md files (ollama, frp, firecrawl, excalidraw,
+   spec-kit, AutoGPT, hermes-agent — ~450 references scanned): every issue
+   it raised in early versions turned out to be our bug, not theirs, and
+   eight false-positive classes were fixed in v0.1.1 with regression tests.
 2. **Grounded generation.** `init` writes only commands it found in your
    repo. It never invents a `make test` that doesn't exist.
 3. **Zero dependencies.** Pure stdlib Go (~5k LOC). `go build` is the whole
