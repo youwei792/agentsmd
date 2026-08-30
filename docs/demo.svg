@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="780" height="524" viewBox="0 0 780 524" font-family="'SF Mono','JetBrains Mono',Menlo,Consolas,monospace">
+<defs><clipPath id="r"><rect width="780" height="524" rx="12"/></clipPath></defs>
+<g clip-path="url(#r)">
+<rect width="780" height="524" fill="#0d1117"/>
+<rect width="780" height="46" fill="#161b22"/>
+<line x1="0" y1="46" x2="780" y2="46" stroke="#30363d" stroke-width="1"/>
+<circle cx="22" cy="23" r="7" fill="#ff5f57"/>
+<circle cx="46" cy="23" r="7" fill="#febc2e"/>
+<circle cx="70" cy="23" r="7" fill="#28c840"/>
+<text x="390.0" text-anchor="middle" y="28" fill="#7d8590" font-size="13">agentsmd doctor</text>
+<text x="28" y="74" fill="#9ecbff" font-size="13.5" font-weight="bold" xml:space="preserve">$ agentsmd doctor</text>
+<text x="28" y="126" fill="#e6edf3" font-size="13.5" font-weight="bold" xml:space="preserve">  agentsmd health check   A  100/100</text>
+<text x="28" y="178" fill="#e6edf3" font-size="13.5" font-weight="bold" xml:space="preserve">  Context footprint</text>
+<text x="28" y="204" fill="#7d8590" font-size="13.5" font-weight="normal" xml:space="preserve">    AGENTS.md                              ~559 tokens</text>
+<text x="28" y="230" fill="#7d8590" font-size="13.5" font-weight="normal" xml:space="preserve">    CLAUDE.md                              ~24 tokens</text>
+<text x="28" y="256" fill="#7d8590" font-size="13.5" font-weight="normal" xml:space="preserve">    GEMINI.md                              ~24 tokens</text>
+<text x="28" y="282" fill="#e6edf3" font-size="13.5" font-weight="bold" xml:space="preserve">    total                                  ~607 tokens</text>
+<text x="28" y="308" fill="#7d8590" font-size="13.5" font-weight="normal" xml:space="preserve">    0.47% of a 128k context window</text>
+<text x="28" y="360" fill="#e6edf3" font-size="13.5" font-weight="bold" xml:space="preserve">  Tool bridges (AGENTS.md as source of truth)</text>
+<text x="28" y="386" fill="#3fb950" font-size="13.5" font-weight="bold" xml:space="preserve">    ✓ claude     → CLAUDE.md in sync</text>
+<text x="28" y="412" fill="#3fb950" font-size="13.5" font-weight="bold" xml:space="preserve">    ✓ gemini     → GEMINI.md in sync</text>
+<text x="28" y="464" fill="#3fb950" font-size="13.5" font-weight="bold" xml:space="preserve">  ✓ Agent instructions look healthy.</text>
+</g></svg>

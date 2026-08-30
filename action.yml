@@ -1,0 +1,51 @@
+name: 'agentsmd check'
+description: >
+  Validate AGENTS.md / CLAUDE.md in CI: fail the build when agent
+  instructions reference commands or files that do not exist, or when
+  tool bridges (CLAUDE.md → AGENTS.md) are stale.
+branding:
+  icon: 'check-circle'
+  color: 'green'
+
+inputs:
+  path:
+    description: 'Repository path to check'
+    required: false
+    default: '.'
+  strict:
+    description: 'Treat warnings as failures'
+    required: false
+    default: 'false'
+  sync-check:
+    description: 'Also verify CLAUDE.md/GEMINI.md bridges are up to date'
+    required: false
+    default: 'true'
+  version:
+    description: 'agentsmd version to install'
+    required: false
+    default: 'v0.1.0'
+
+runs:
+  using: 'composite'
+  steps:
+    - shell: bash
+      run: |
+        set -e
+        VERSION="${{ inputs.version }}"
+        OS="$(echo "${{ runner.os }}" | tr '[:upper:]' '[:lower:]')"
+        ARCH="${{ runner.arch }}"
+        case "$ARCH" in
+          X64) ARCH="amd64" ;;
+          ARM64) ARCH="arm64" ;;
+        esac
+        TARBALL="agentsmd_${VERSION#v}_${OS}_${ARCH}.tar.gz"
+        URL="https://github.com/youwei792/agentsmd/releases/download/${VERSION}/${TARBALL}"
+        echo "Installing agentsmd from $URL"
+        curl -fsSL "$URL" | tar -xz
+        chmod +x agentsmd
+        ./agentsmd version
+    - shell: bash
+      run: ./agentsmd check ${{ inputs.path }} ${{ inputs.strict == 'true' && '--strict' || '' }}
+    - shell: bash
+      if: ${{ inputs.sync-check == 'true' }}
+      run: ./agentsmd sync --check ${{ inputs.path }}

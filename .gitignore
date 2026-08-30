@@ -1,0 +1,5 @@
+dist/
+agentsmd
+agentsmd.exe
+*.bak
+.DS_Store
