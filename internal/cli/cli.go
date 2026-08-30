@@ -11,8 +11,10 @@ import (
 	"github.com/youwei792/agentsmd/internal/analyze"
 	"github.com/youwei792/agentsmd/internal/checkcmd"
 	"github.com/youwei792/agentsmd/internal/doctor"
+	"github.com/youwei792/agentsmd/internal/fleet"
 	"github.com/youwei792/agentsmd/internal/generate"
 	"github.com/youwei792/agentsmd/internal/lint"
+	"github.com/youwei792/agentsmd/internal/skills"
 	"github.com/youwei792/agentsmd/internal/syncmd"
 	"github.com/youwei792/agentsmd/internal/tokens"
 	"github.com/youwei792/agentsmd/internal/ui"
@@ -34,6 +36,8 @@ Commands:
   tokens    estimate the context cost of agent instruction files
   sync      bridge AGENTS.md to CLAUDE.md / GEMINI.md
   doctor    run check + lint + tokens + sync-check in one report
+  skills    validate Agent Skills (SKILL.md) bundles in this repo
+  org       fleet report: AGENTS.md health of every repo of an org/user
   analyze   show the toolchain facts agentsmd detects (debug/demo)
   version   print version
 
@@ -63,6 +67,10 @@ func Run(args []string) int {
 		return cmdDoctor(rest)
 	case "analyze":
 		return cmdAnalyze(rest)
+	case "skills":
+		return cmdSkills(rest)
+	case "org":
+		return cmdOrg(rest)
 	case "version", "--version", "-v":
 		fmt.Printf("agentsmd %s\n", version)
 		return 0
@@ -265,7 +273,7 @@ func cmdAnalyze(args []string) int {
 	if *jsonOut {
 		return printJSON(facts)
 	}
-	fmt.Println(ui.Bold("Toolchain facts") + ui.Dim("  (" + root + ")"))
+	fmt.Println(ui.Bold("Toolchain facts") + ui.Dim("  ("+root+")"))
 	fmt.Printf("  languages         %s\n", joinOr(facts.Languages))
 	fmt.Printf("  package managers  %s\n", joinOr(facts.PackageMgrs))
 	fmt.Printf("  test frameworks   %s\n", joinOr(facts.TestFrameworks))
@@ -307,6 +315,87 @@ func cmdAnalyze(args []string) int {
 	return 0
 }
 
+func cmdSkills(args []string) int {
+	fs := flag.NewFlagSet("skills", flag.ExitOnError)
+	jsonOut := fs.Bool("json", false, "output JSON")
+	fs.Parse(normalizeArgs(args))
+
+	root := resolvePath(fs.Arg(0))
+	reports := skills.Run(root)
+	if *jsonOut {
+		return printJSON(reports)
+	}
+	if len(reports) == 0 {
+		fmt.Println(ui.Dim("no SKILL.md bundles found (looked in .claude/skills/ and skills/)"))
+		return 0
+	}
+	bad := 0
+	fmt.Println(ui.Bold("Agent Skills:"))
+	for _, r := range reports {
+		icon := ui.Green("✓")
+		if !r.Valid {
+			icon = ui.Red("✗")
+			bad++
+		}
+		fmt.Printf("  %s %-40s %s\n", icon, r.Path, ui.Dim(fmt.Sprintf("~%d tokens", r.Tokens)))
+		for _, f := range r.Findings {
+			sev := ui.Yellow("⚠")
+			if f.Severity == skills.Err {
+				sev = ui.Red("✗")
+			}
+			fmt.Printf("      %s %s\n", sev, f.Message)
+		}
+	}
+	total := 0
+	for _, r := range reports {
+		total += r.Tokens
+	}
+	fmt.Printf("\n  %s skills, ~%d tokens loaded on demand\n", ui.Bold(fmt.Sprintf("%d", len(reports))), total)
+	if bad > 0 {
+		return 1
+	}
+	return 0
+}
+
+func cmdOrg(args []string) int {
+	fs := flag.NewFlagSet("org", flag.ExitOnError)
+	limit := fs.Int("limit", 30, "max repositories to scan")
+	jsonOut := fs.Bool("json", false, "output JSON")
+	fs.Parse(normalizeArgs(args))
+
+	owner := fs.Arg(0)
+	if owner == "" {
+		fmt.Fprintln(os.Stderr, "usage: agentsmd org <owner> [--limit N]")
+		return 2
+	}
+	rep, err := fleet.Scan("gh", owner, *limit)
+	if err != nil {
+		return fatal(err)
+	}
+	if *jsonOut {
+		return printJSON(rep)
+	}
+	fmt.Printf("\n%s%s%s\n",
+		ui.Bold("Fleet report: "), ui.Bold(owner),
+		ui.Dim(fmt.Sprintf("  %d/%d public repos ship AGENTS.md", rep.ReposHit, rep.ReposSeen)))
+	if len(rep.Reports) == 0 {
+		fmt.Println("  " + ui.Dim("no root AGENTS.md files found"))
+		return 0
+	}
+	for _, r := range rep.Reports {
+		flags := ""
+		switch {
+		case r.TODOs > 0:
+			flags = ui.Yellow(fmt.Sprintf("  %d TODO(s)", r.TODOs))
+		case r.CodeRefs == 0:
+			flags = ui.Yellow("  no commands documented")
+		}
+		fmt.Printf("  %-44s ~%5d tokens%s\n", r.Repo, r.Tokens, flags)
+	}
+	fmt.Printf("\n  fleet context cost: %s\n", ui.Bold(fmt.Sprintf("~%d tokens per full org onboarding", rep.TotalTokens)))
+	return 0
+}
+
 // ---- helpers ----
 
 // boolFlags and valueFlags are known across all subcommands. Because Go's
@@ -319,7 +408,7 @@ var boolFlags = map[string]bool{
 	"-h": true, "--help": true,
 }
 
-var valueFlags = map[string]bool{"--mode": true, "--tools": true}
+var valueFlags = map[string]bool{"--mode": true, "--tools": true, "--limit": true}
 
 func normalizeArgs(args []string) []string {
 	var flags, rest []string

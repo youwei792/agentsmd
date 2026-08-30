@@ -20,9 +20,9 @@ import (
 type Severity string
 
 const (
-	Err     Severity = "error"
-	Warn    Severity = "warning"
-	Info    Severity = "info"
+	Err  Severity = "error"
+	Warn Severity = "warning"
+	Info Severity = "info"
 )
 
 // Finding is one lint result.
@@ -59,6 +59,7 @@ func Run(root string, facts *analyze.Facts) *Report {
 		})
 	} else {
 		l.checkContent(content)
+		l.checkSecurity(content)
 	}
 	l.checkToolFiles()
 	l.checkStaleness(content)
@@ -200,6 +201,10 @@ func (l *linter) checkContent(content string) {
 		})
 	}
 
+	// R: undocumented commands — scripts that exist in the repo (and are
+	// load-bearing for CI/dev) but never appear in the instructions.
+	l.checkUndocumented(content)
+
 	// R: dead command/file references (delegates to the validate engine).
 	eng := validate.NewEngine(l.root, l.facts)
 	for _, f := range eng.CheckDocument("AGENTS.md", content) {
@@ -213,6 +218,43 @@ func (l *linter) checkContent(content string) {
 			Hint:    "fix the command or update AGENTS.md",
 		})
 	}
+}
+
+// checkUndocumented flags repo scripts with build/test/lint purposes that
+// are nowhere mentioned in AGENTS.md. Agents copy what they can see: an
+// undocumented canonical command tends to be reinvented badly.
+func (l *linter) checkUndocumented(content string) {
+	if l.facts == nil {
+		return
+	}
+	important := map[string]bool{"test": true, "lint": true, "build": true, "format": true}
+	var missing []string
+	for _, s := range l.facts.Scripts {
+		if !important[s.Purpose] {
+			continue
+		}
+		if wordRe(s.Name).MatchString(content) {
+			continue
+		}
+		missing = append(missing, s.Cmdline)
+	}
+	if len(missing) == 0 {
+		return
+	}
+	sort.Strings(missing)
+	if len(missing) > 3 {
+		missing = append(missing[:2], "…")
+	}
+	l.out = append(l.out, Finding{
+		Rule: "UNDOCUMENTED-CMDS", Severity: Info,
+		Message: "repository commands never mentioned in AGENTS.md: " + strings.Join(missing, ", "),
+		Hint:    "agents reinvent undocumented commands; document the canonical ones",
+	})
+}
+
+// wordRe builds a case-sensitive word-boundary matcher per command name.
+func wordRe(name string) *regexp.Regexp {
+	return regexp.MustCompile(`\b` + regexp.QuoteMeta(name) + `\b`)
 }
 
 var pmNames = []string{"npm", "pnpm", "yarn", "bun"}

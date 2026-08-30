@@ -17,10 +17,10 @@ type FileReport struct {
 
 // Report is the aggregate context footprint.
 type Report struct {
-	Files  []FileReport `json:"files"`
-	Total  int          `json:"total_tokens"`
-	Chars  int          `json:"total_chars"`
-	Bytes  int          `json:"total_bytes"`
+	Files []FileReport `json:"files"`
+	Total int          `json:"total_tokens"`
+	Chars int          `json:"total_chars"`
+	Bytes int          `json:"total_bytes"`
 }
 
 // Estimate returns the token estimate for a document. We use the widely
@@ -86,6 +86,21 @@ func Measure(root string) *Report {
 	}
 	// .claude/CLAUDE.md and .cursor/rules/*.mdc
 	add(".claude/CLAUDE.md")
+	// Agent Skills bundles
+	if ents, err := os.ReadDir(filepath.Join(root, ".claude", "skills")); err == nil {
+		for _, e := range ents {
+			if e.IsDir() {
+				add(filepath.Join(".claude", "skills", e.Name(), "SKILL.md"))
+			}
+		}
+	}
+	if ents, err := os.ReadDir(filepath.Join(root, "skills")); err == nil {
+		for _, e := range ents {
+			if e.IsDir() {
+				add(filepath.Join("skills", e.Name(), "SKILL.md"))
+			}
+		}
+	}
 	if ents, err := os.ReadDir(filepath.Join(root, ".cursor", "rules")); err == nil {
 		for _, e := range ents {
 			if !e.IsDir() && strings.HasSuffix(e.Name(), ".mdc") {
@@ -103,12 +118,12 @@ func Measure(root string) *Report {
 
 // ContextBudgets are common model context sizes for framing.
 func ContextBudgets() []struct {
-	Name  string
-	Size  int
+	Name string
+	Size int
 } {
 	return []struct {
-		Name  string
-		Size  int
+		Name string
+		Size int
 	}{
 		{"128k", 128 * 1000},
 		{"200k", 200 * 1000},

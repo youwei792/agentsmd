@@ -78,8 +78,8 @@ func TestHealthyDocScoresWell(t *testing.T) {
 
 func TestCLAUDEWithoutImportFlagged(t *testing.T) {
 	root := writeRoot(t, map[string]string{
-		"AGENTS.md":  "# AGENTS.md\n\ncontent\n",
-		"CLAUDE.md":  "# CLAUDE.md\n\nsome stale duplicated content\n",
+		"AGENTS.md": "# AGENTS.md\n\ncontent\n",
+		"CLAUDE.md": "# CLAUDE.md\n\nsome stale duplicated content\n",
 	})
 	rep := runLint(t, root)
 	found := false
@@ -94,7 +94,10 @@ func TestCLAUDEWithoutImportFlagged(t *testing.T) {
 }
 
 func TestGradeBoundaries(t *testing.T) {
-	cases := []struct{ score int; want string }{
+	cases := []struct {
+		score int
+		want  string
+	}{
 		{95, "A"}, {85, "B"}, {70, "C"}, {50, "D"}, {10, "F"},
 	}
 	for _, c := range cases {
@@ -107,8 +110,8 @@ func TestGradeBoundaries(t *testing.T) {
 func TestPackageManagerMismatch(t *testing.T) {
 	doc := "# AGENTS.md\n\n## Commands\n\n```bash\nyarn install\nyarn test\n```\n"
 	root := writeRoot(t, map[string]string{
-		"AGENTS.md":    doc,
-		"package.json": `{"name":"x"}`,
+		"AGENTS.md":         doc,
+		"package.json":      `{"name":"x"}`,
 		"package-lock.json": "{}",
 	})
 	rep := runLint(t, root)

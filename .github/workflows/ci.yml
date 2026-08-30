@@ -70,10 +70,13 @@ jobs:
             name="${d%/}"
             tar -czf "${name}.tar.gz" "$name"
           done
+          sha256sum agentsmd_*.tar.gz > checksums.txt
       - name: Create release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ env.VERSION }}
           name: ${{ env.VERSION }}
           generate_release_notes: true
-          files: dist/*.tar.gz
+          files: |
+            dist/*.tar.gz
+            dist/checksums.txt

@@ -4,6 +4,34 @@ All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/) and the
 project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.2.0] - 2026-08-30
+
+Security and surface-expansion release.
+
+### Added
+- `agentsmd skills`: validate Agent Skills (SKILL.md) bundles — frontmatter
+  rules (name format & directory match, description length, allowed-tools),
+  bundle integrity (referenced files must travel with the skill), token cost.
+  Skill files are now also part of `tokens`/`doctor` context reports.
+- `agentsmd org <owner>`: fleet report of AGENTS.md health across all public
+  repositories of a GitHub org or user (read-only, via the `gh` CLI).
+- Security rules in `lint`:
+  - `SECRETS-FOUND` — live API keys, GitHub/Slack tokens, AWS key ids and
+    private-key blocks in instruction files; placeholders (`sk-xxx…`) and
+    the AWS `…EXAMPLE` convention stay silent.
+  - `RISKY-COMMAND` — `curl … | sh`, `sudo`, `eval`, `chmod 777`,
+    `rm -rf ~` documented as agent-runnable commands.
+- `UNDOCUMENTED-CMDS` lint rule: repo commands that exist but are never
+  mentioned in AGENTS.md.
+- `checksums.txt` (SHA-256) published with every release; the GitHub Action
+  verifies it before running the binary.
+- Path hardening: references escaping the repository root (`../`) are never
+  read.
+- `SECURITY.md` and public accuracy benchmark ([docs/benchmarks.md]).
+
+### Changed
+- README available in English and 简体中文.
+
 ## [0.1.1] - 2026-08-30
 
 Engine hardening release, driven by validating `check` against real

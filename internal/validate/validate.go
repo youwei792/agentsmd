@@ -759,6 +759,9 @@ func hasGlob(p string) bool {
 }
 
 func (e *Engine) globHasMatches(p string) bool {
+	if !e.withinRoot(p) {
+		return false
+	}
 	matches, err := filepath.Glob(filepath.Join(e.Root, p))
 	return err == nil && len(matches) > 0
 }
@@ -838,6 +841,9 @@ func (e *Engine) relExists(p string) bool {
 	if filepath.IsAbs(p) {
 		return false
 	}
+	if !e.withinRoot(p) {
+		return false // references outside the repo are never checked
+	}
 	_, err := os.Stat(filepath.Join(e.Root, p))
 	return err == nil
 }
@@ -846,8 +852,26 @@ func (e *Engine) dirExists(p string) bool {
 	if filepath.IsAbs(p) {
 		return false
 	}
+	if !e.withinRoot(p) {
+		return false
+	}
 	fi, err := os.Stat(filepath.Join(e.Root, p))
 	return err == nil && fi.IsDir()
+}
+
+// withinRoot reports whether a repo-relative path stays inside the repo
+// after cleaning. References that escape the root ("../shared/x") are not
+// validated and not read — agentsmd inspects the checkout only.
+func (e *Engine) withinRoot(p string) bool {
+	if e.subDir != "" && !e.escapeFree(e.subDir) {
+		return false
+	}
+	return e.escapeFree(p)
+}
+
+func (e *Engine) escapeFree(rel string) bool {
+	clean := filepath.ToSlash(filepath.Clean(rel))
+	return clean == "." || clean == "" || (!strings.HasPrefix(clean, "../") && clean != "..")
 }
 
 func looksLikeFilePath(p string) bool {

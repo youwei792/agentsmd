@@ -1,5 +1,7 @@
 <div align="center">
 
+**English** | [简体中文](README.zh-CN.md)
+
 # agentsmd
 
 **Your AI agent's instructions deserve CI.**
@@ -135,6 +137,8 @@ agentsmd doctor
 | `agentsmd tokens` | Context cost of agent files (`--json`) |
 | `agentsmd sync` | Bridge CLAUDE.md/GEMINI.md to AGENTS.md (`--mode import\|copy\|symlink`, `--check`) |
 | `agentsmd doctor` | Everything above in one report (`--json`) |
+| `agentsmd skills` | Validate Agent Skills (`SKILL.md`) bundles — frontmatter rules, bundle integrity, token cost |
+| `agentsmd org` | Fleet report: AGENTS.md health of every public repo of an org/user (requires `gh`) |
 | `agentsmd analyze` | Show the detected toolchain facts (`--json`) |
 
 Every command emits JSON with `--json`, so you can build your own dashboards.
@@ -147,14 +151,38 @@ targets, justfile recipes, Poetry/uv/pip setup, pytest/ruff/eslint/prettier/
 biome/golangci-lint/clippy configs, 60+ frameworks from dependency manifests,
 GitHub Actions & GitLab CI commands, Docker, and your existing agent files.
 
+## Security posture
+
+Agent instruction files are an attack surface: agents follow them
+literally, and people paste credentials into them. `lint` therefore ships
+security rules:
+
+- **`SECRETS-FOUND`** — live API keys, GitHub/Slack tokens, AWS key ids and
+  private-key blocks documented in your instructions (placeholder values
+  like `sk-xxx…` and the AWS `…EXAMPLE` convention stay silent).
+- **`RISKY-COMMAND`** — `curl … | sh`, `sudo`, `eval`, `chmod 777`,
+  `rm -rf ~` documented as things agents should run.
+
+And the tool itself is designed to be safe to run anywhere:
+
+- **Never executes** the commands it reads — parsing and `os.Stat` only.
+- **Fully offline** (except `org`, which shells out to the `gh` CLI).
+- **Zero dependencies**, no telemetry, checkout-only inspection — refs
+  that escape the repo root are never read.
+- **Checksummed releases**: the GitHub Action verifies `checksums.txt`
+  before running the binary.
+
+Details and reporting: [SECURITY.md](SECURITY.md). Public accuracy
+evidence: [docs/benchmarks.md](docs/benchmarks.md).
+
 ## Design principles
 
 1. **Conservative or silent.** A checker that cries wolf gets uninstalled.
    Findings must be provably right. The engine was validated against real
-   production AGENTS.md files (ollama, frp, firecrawl, excalidraw,
-   spec-kit, AutoGPT, hermes-agent — ~450 references scanned): every issue
-   it raised in early versions turned out to be our bug, not theirs, and
-   eight false-positive classes were fixed in v0.1.1 with regression tests.
+   production AGENTS.md files (see [docs/benchmarks.md](docs/benchmarks.md)):
+   ~555 references across 8 real repos, every early finding triaged by
+   hand, eight false-positive classes fixed in v0.1.1 with regression
+   tests.
 2. **Grounded generation.** `init` writes only commands it found in your
    repo. It never invents a `make test` that doesn't exist.
 3. **Zero dependencies.** Pure stdlib Go (~5k LOC). `go build` is the whole
@@ -186,8 +214,8 @@ breaks, CI goes red before an agent notices.
 
 ## Roadmap
 
-- [ ] `agentsmd skills` — scaffold & lint SKILL.md agent skills
-- [ ] Org mode: `agentsmd org <gh-org>` health report across repositories
+- [x] `agentsmd skills` — lint SKILL.md agent skills (v0.2.0)
+- [x] Org mode: `agentsmd org <gh-org>` health report across repositories (v0.2.0)
 - [ ] `--fix` for safe auto-repairs (dead links → closest match)
 - [ ] Pre-commit hook: check on manifest changes
 - [ ] npm distribution wrapper

@@ -41,8 +41,19 @@ runs:
         TARBALL="agentsmd_${VERSION#v}_${OS}_${ARCH}.tar.gz"
         URL="https://github.com/youwei792/agentsmd/releases/download/${VERSION}/${TARBALL}"
         echo "Installing agentsmd from $URL"
-        curl -fsSL "$URL" | tar -xz
-        chmod +x agentsmd
+        curl -fsSL -o agentsmd.tgz "$URL"
+        curl -fsSL -O "https://github.com/youwei792/agentsmd/releases/download/${VERSION}/checksums.txt"
+        # Verify the tarball checksum before extracting/running anything.
+        LINE="$(grep "  ${TARBALL}\$" checksums.txt)"
+        if [ -z "$LINE" ]; then echo "checksums.txt has no entry for ${TARBALL}" >&2; exit 1; fi
+        if command -v sha256sum >/dev/null 2>&1; then
+          echo "$LINE" | sha256sum -c - >/dev/null
+        else
+          echo "$LINE" | shasum -a 256 -c - >/dev/null
+        fi
+        tar -xzf agentsmd.tgz
+        find . -name agentsmd -type f | head -1 | xargs chmod +x
+        mv "$(find . -name agentsmd -type f | head -1)" agentsmd
         ./agentsmd version
     - shell: bash
       run: ./agentsmd check ${{ inputs.path }} ${{ inputs.strict == 'true' && '--strict' || '' }}
