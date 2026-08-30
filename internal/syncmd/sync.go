@@ -36,11 +36,11 @@ func Targets() []Target {
 
 // Action describes what sync did (or would do) for one target.
 type Action struct {
-	Tool    string `json:"tool"`
-	Path    string `json:"path"`
-	Status  string `json:"status"` // created | updated | up-to-date | would-create | would-update
-	Detail  string `json:"detail,omitempty"`
-	Mode    string `json:"mode"`
+	Tool   string `json:"tool"`
+	Path   string `json:"path"`
+	Status string `json:"status"` // created | updated | up-to-date | would-create | would-update
+	Detail string `json:"detail,omitempty"`
+	Mode   string `json:"mode"`
 }
 
 // Result is the aggregate outcome.

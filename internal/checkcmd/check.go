@@ -26,8 +26,8 @@ func Run(root string, strict, jsonOut bool) int {
 	eng := validate.NewEngine(root, facts)
 
 	type docResult struct {
-		Path     string            `json:"path"`
-		Checked  int               `json:"checked"`
+		Path     string             `json:"path"`
+		Checked  int                `json:"checked"`
 		Findings []validate.Finding `json:"findings"`
 	}
 	var results []docResult
@@ -60,11 +60,11 @@ func Run(root string, strict, jsonOut bool) int {
 
 	if jsonOut {
 		type out struct {
-			Root       string       `json:"root"`
-			Checked    int          `json:"checked_refs"`
-			Errors     int          `json:"errors"`
-			Warnings   int          `json:"warnings"`
-			Documents  []docResult  `json:"documents"`
+			Root      string      `json:"root"`
+			Checked   int         `json:"checked_refs"`
+			Errors    int         `json:"errors"`
+			Warnings  int         `json:"warnings"`
+			Documents []docResult `json:"documents"`
 		}
 		errs, warns := 0, 0
 		for _, r := range results {
