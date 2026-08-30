@@ -18,7 +18,9 @@ import (
 	"github.com/youwei792/agentsmd/internal/ui"
 )
 
-const version = "0.1.0"
+// version is overridden at release build time via
+// -ldflags "-X github.com/youwei792/agentsmd/internal/cli.version=<tag>".
+var version = "dev"
 
 const usage = `agentsmd — keep AI agent instructions as healthy as your code
 

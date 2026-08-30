@@ -26,6 +26,8 @@ eight false-positive classes found in our own engine and eliminated).
 - Markdown table/list punctuation leaking into inline tokens
   (`docs/AGENTS.md)`) and bare extensions (`.ts`) are cleaned up.
 - The nested `package.json` fallback now prefers the shallowest package.
+- Self-reported `agentsmd version` now matches the release tag
+  (injected at build time instead of a hardcoded constant).
 - Windows: test binary gets a `.exe` suffix (CI fix).
 
 ## [0.1.0] - 2026-08-30

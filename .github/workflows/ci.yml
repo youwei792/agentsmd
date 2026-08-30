@@ -62,7 +62,7 @@ jobs:
               ext=""
               [ "$os" = "windows" ] && ext=".exe"
               CGO_ENABLED=0 GOOS=$os GOARCH=$arch go build -trimpath \
-                -ldflags "-s -w" -o "dist/agentsmd_${os}_${arch}/agentsmd${ext}" .
+                -ldflags "-s -w -X github.com/youwei792/agentsmd/internal/cli.version=${VERSION#v}" -o "dist/agentsmd_${os}_${arch}/agentsmd${ext}" .
             done
           done
           cd dist
