@@ -37,7 +37,7 @@ Commands:
   sync      bridge AGENTS.md to CLAUDE.md / GEMINI.md
   doctor    run check + lint + tokens + sync-check in one report
   skills    validate Agent Skills (SKILL.md) bundles in this repo
-  org       fleet report: AGENTS.md health of every repo of an org/user
+  org       fleet report: AGENTS.md health of every repo of an org/user (needs gh)
   analyze   show the toolchain facts agentsmd detects (debug/demo)
   version   print version
 
@@ -483,9 +483,6 @@ func humanBytes(n int) string {
 
 // exitCodeFor: lint failures should fail CI only on hard problems.
 func exitCodeFor(score int, findings int) int {
-	if score == 0 || findings == 0 && score < 100 {
-		_ = findings
-	}
 	if score < 60 {
 		return 1
 	}

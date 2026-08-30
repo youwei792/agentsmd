@@ -4,6 +4,22 @@ All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/) and the
 project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.2.1] - 2026-08-30
+
+Review-round fixes.
+
+### Fixed
+- `init` no longer generates `npm run` commands for pnpm/yarn/bun
+  repositories — generated instructions now use the repo's own package
+  manager (`pnpm test`, `yarn test`, `bun run test`), so the generated
+  file no longer trips the PM-MISMATCH lint rule on its own output.
+- `doctor` now validates Agent Skills (`SKILL.md`) bundles as part of the
+  report; invalid skills cost 15 points each.
+- `agentsmd org` follows pagination (up to 500 repositories) instead of
+  silently capping at the first 100.
+- README "zero dependencies" badge anchor; dead code in lint exit path.
+- Moving major tag `v1` now exists for `uses: youwei792/agentsmd@v1`.
+
 ## [0.2.0] - 2026-08-30
 
 Security and surface-expansion release.

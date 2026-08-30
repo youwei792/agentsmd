@@ -9,6 +9,7 @@ import (
 
 	"github.com/youwei792/agentsmd/internal/analyze"
 	"github.com/youwei792/agentsmd/internal/lint"
+	"github.com/youwei792/agentsmd/internal/skills"
 	"github.com/youwei792/agentsmd/internal/syncmd"
 	"github.com/youwei792/agentsmd/internal/tokens"
 	"github.com/youwei792/agentsmd/internal/ui"
@@ -16,13 +17,14 @@ import (
 
 // Report aggregates all sub-reports for --json output.
 type Report struct {
-	Root      string         `json:"root"`
-	Facts     *analyze.Facts `json:"facts"`
-	Lint      *lint.Report   `json:"lint"`
-	Tokens    *tokens.Report `json:"tokens"`
+	Root      string          `json:"root"`
+	Facts     *analyze.Facts  `json:"facts"`
+	Lint      *lint.Report    `json:"lint"`
+	Tokens    *tokens.Report  `json:"tokens"`
 	SyncState []syncmd.Action `json:"sync"`
-	Score     int            `json:"score"`
-	Grade     string         `json:"grade"`
+	Skills    []skills.Report `json:"skills,omitempty"`
+	Score     int             `json:"score"`
+	Grade     string          `json:"grade"`
 }
 
 // Run executes the doctor command.
@@ -35,6 +37,13 @@ func Run(root string, jsonOut bool) int {
 	lr := lint.Run(root, facts)
 	tr := tokens.Measure(root)
 	sr := syncmd.Run(root, syncmd.Mode("import"), nil, true, "")
+	skillReps := skills.Run(root)
+	skillsBad := 0
+	for _, sk := range skillReps {
+		if !sk.Valid {
+			skillsBad++
+		}
+	}
 
 	// Score combines lint (70%) with sync health (30%).
 	score := lr.Score
@@ -50,8 +59,12 @@ func Run(root string, jsonOut bool) int {
 		syncScore := syncOK * 100 / syncTotal
 		score = lr.Score*7/10 + syncScore*3/10
 	}
+	score -= skillsBad * 15
+	if score < 0 {
+		score = 0
+	}
 
-	rep := &Report{Root: root, Facts: facts, Lint: lr, Tokens: tr, SyncState: sr.Actions, Score: score, Grade: lint.Grade(score)}
+	rep := &Report{Root: root, Facts: facts, Lint: lr, Tokens: tr, SyncState: sr.Actions, Skills: skillReps, Score: score, Grade: lint.Grade(score)}
 	if jsonOut {
 		return printJSON(rep)
 	}
@@ -97,6 +110,26 @@ func Run(root string, jsonOut bool) int {
 				fmt.Printf("    %s %-10s → %s %s\n", ui.Green("✓"), a.Tool, a.Path, ui.Dim("in sync"))
 			default:
 				fmt.Printf("    %s %-10s → %s %s\n", ui.Yellow("⚠"), a.Tool, a.Path, ui.Dim(pretty))
+			}
+		}
+	}
+
+	// Agent Skills.
+	if len(skillReps) > 0 {
+		fmt.Println()
+		fmt.Println(ui.Bold("  Agent Skills"))
+		for _, sk := range skillReps {
+			icon := ui.Green("✓")
+			if !sk.Valid {
+				icon = ui.Red("✗")
+			}
+			fmt.Printf("    %s %-38s %s\n", icon, sk.Path, ui.Dim(fmt.Sprintf("~%d tokens", sk.Tokens)))
+			for _, f := range sk.Findings {
+				sev := ui.Yellow("⚠")
+				if f.Severity == skills.Err {
+					sev = ui.Red("✗")
+				}
+				fmt.Printf("        %s %s\n", sev, f.Message)
 			}
 		}
 	}

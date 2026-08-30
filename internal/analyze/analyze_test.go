@@ -40,8 +40,8 @@ func TestAnalyzeNodeProject(t *testing.T) {
 	if f.Script("test") == nil {
 		t.Error("expected a test script")
 	}
-	if f.Script("test").Cmdline != "npm run test" {
-		t.Errorf("unexpected test cmdline: %q", f.Script("test").Cmdline)
+	if f.Script("test").Cmdline != "pnpm test" {
+		t.Errorf("pnpm repo must generate pnpm commands, got %q", f.Script("test").Cmdline)
 	}
 	foundExpress := false
 	for _, fw := range f.Frameworks {
@@ -179,5 +179,28 @@ func TestAnalyzeAgentFilesAndSync(t *testing.T) {
 	}
 	if !claude.HasRef {
 		t.Error("expected CLAUDE.md to report HasRef")
+	}
+}
+
+func TestScriptCommandsMatchPackageManager(t *testing.T) {
+	// Generated cmdlines must match the lockfile, or the repo's own lint
+	// (PM-MISMATCH) would flag the generated file.
+	cases := []struct{ pm, lock, want string }{
+		{"pnpm", "pnpm-lock.yaml", "pnpm test"},
+		{"yarn", "yarn.lock", "yarn test"},
+		{"bun", "bun.lock", "bun run test"},
+		{"npm", "package-lock.json", "npm run test"},
+	}
+	for _, c := range cases {
+		root := t.TempDir()
+		writeFile(t, root, "package.json", `{"name":"app","scripts":{"test":"vitest run"}}`)
+		writeFile(t, root, c.lock, "")
+		f, err := Analyze(root)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := f.Script("test").Cmdline; got != c.want {
+			t.Errorf("%s repo: generated %q, want %q", c.pm, got, c.want)
+		}
 	}
 }

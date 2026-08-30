@@ -31,11 +31,11 @@ type RepoReport struct {
 
 // FleetReport aggregates per-repo results.
 type FleetReport struct {
-	Owner      string       `json:"owner"`
-	ReposSeen  int          `json:"repos_seen"`  // total public repos encountered
-	ReposHit   int          `json:"repos_hit"`   // those with a root AGENTS.md
-	Reports    []RepoReport `json:"reports"`     // only the hits, sorted by tokens desc
-	TotalTokens int         `json:"total_tokens"`
+	Owner       string       `json:"owner"`
+	ReposSeen   int          `json:"repos_seen"` // total public repos encountered
+	ReposHit    int          `json:"repos_hit"`  // those with a root AGENTS.md
+	Reports     []RepoReport `json:"reports"`    // only the hits, sorted by tokens desc
+	TotalTokens int          `json:"total_tokens"`
 }
 
 // Scan returns the fleet report for owner, examining at most limit repos.
@@ -81,28 +81,36 @@ func Scan(ghCommand, owner string, limit int) (*FleetReport, error) {
 	return rep, nil
 }
 
-// listRepos returns full_name for each public repo of the owner.
+// listRepos returns full_name for each public repo of the owner, following
+// pagination up to 5 pages (500 repositories).
 func listRepos(gh, owner string) ([]string, error) {
 	// Organizations and users expose different endpoints; try orgs first.
-	for _, ep := range []string{"orgs/" + owner + "/repos?per_page=100", "users/" + owner + "/repos?per_page=100"} {
-		out, err := runGH(gh, ep)
-		if err != nil {
-			continue
-		}
-		var nodes []struct {
-			FullName string `json:"full_name"`
-			Fork     bool   `json:"fork"`
-		}
-		if json.Unmarshal(out, &nodes) != nil {
-			continue
-		}
+	for _, base := range []string{"orgs/" + owner + "/repos", "users/" + owner + "/repos"} {
 		var names []string
-		for _, n := range nodes {
-			if !n.Fork && n.FullName != "" {
-				names = append(names, n.FullName)
+		sawAny := false
+		for page := 1; page <= 5; page++ {
+			out, err := runGH(gh, fmt.Sprintf("%s?per_page=100&page=%d", base, page))
+			if err != nil {
+				break
+			}
+			var nodes []struct {
+				FullName string `json:"full_name"`
+				Fork     bool   `json:"fork"`
+			}
+			if json.Unmarshal(out, &nodes) != nil || len(nodes) == 0 {
+				break
+			}
+			sawAny = true
+			for _, n := range nodes {
+				if !n.Fork && n.FullName != "" {
+					names = append(names, n.FullName)
+				}
+			}
+			if len(nodes) < 100 {
+				break
 			}
 		}
-		if len(nodes) > 0 {
+		if sawAny {
 			return names, nil
 		}
 	}

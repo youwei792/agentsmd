@@ -15,7 +15,7 @@ Claude Code / Gemini CLI to it in one line.
 [![CI](https://github.com/youwei792/agentsmd/actions/workflows/ci.yml/badge.svg)](https://github.com/youwei792/agentsmd/actions/workflows/ci.yml)
 [![Go Reference](https://img.shields.io/badge/go-1.24+-00ADD8?logo=go&logoColor=white)](https://go.dev)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Zero dependencies](https://img.shields.io/badge/dependencies-0-brightgreen)](#why-zero-dependencies)
+[![Zero dependencies](https://img.shields.io/badge/dependencies-0-brightgreen)](#design-principles)
 
 ![agentsmd doctor — 100/100 on its own repository](docs/demo.svg)
 

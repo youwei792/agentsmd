@@ -2,6 +2,7 @@ package analyze
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -128,10 +129,23 @@ func analyzeNode(f *Facts) {
 		f.Linters = addUnique(f.Linters, "biome")
 	}
 
-	// Scripts.
+	// Scripts — the cmdline uses the repo's own package manager so that
+	// generated instructions never contradict the lockfile (PM-MISMATCH).
+	runner := f.PackageManager()
+	if runner == "" {
+		runner = "npm"
+	}
+	// Idiomatic invocation per runner; all validate against package.json.
+	invocation := map[string]string{
+		"npm": "npm run %s", "pnpm": "pnpm %s", "yarn": "yarn %s", "bun": "bun run %s",
+	}
+	tpl := invocation[runner]
+	if tpl == "" {
+		tpl = "npm run %s"
+	}
 	for name := range pj.Scripts {
 		f.Scripts = append(f.Scripts, Command{
-			Name: name, Cmdline: "npm run " + name, Source: "package.json",
+			Name: name, Cmdline: fmt.Sprintf(tpl, name), Source: "package.json",
 			Purpose: classifyScript(name), IsScript: true,
 		})
 	}
