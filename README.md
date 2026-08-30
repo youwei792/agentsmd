@@ -51,6 +51,9 @@ go install github.com/youwei792/agentsmd@latest
 # Homebrew (Linux too)
 brew install youwei792/tap/agentsmd
 
+# npm (global install)
+npm install -g agentsmd
+
 # Or grab a binary from Releases (linux/darwin/windows, amd64/arm64)
 ```
 
@@ -218,7 +221,7 @@ breaks, CI goes red before an agent notices.
 - [x] Org mode: `agentsmd org <gh-org>` health report across repositories (v0.2.0)
 - [ ] `--fix` for safe auto-repairs (dead links → closest match)
 - [ ] Pre-commit hook: check on manifest changes
-- [ ] npm distribution wrapper
+- [x] npm distribution (esbuild-style platform packages; `scripts/build-npm.sh 0.2.0` assembles them — publishing pending npm credentials)
 
 PRs welcome — see [CONTRIBUTING.md](CONTRIBUTING.md).
 

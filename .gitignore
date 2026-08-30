@@ -3,3 +3,4 @@ agentsmd
 agentsmd.exe
 *.bak
 .DS_Store
+npm/dist/
