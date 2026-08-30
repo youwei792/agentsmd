@@ -7,10 +7,10 @@ package analyze
 // Command is a command discovered in the repository (package.json script,
 // Makefile target, justfile recipe, ...).
 type Command struct {
-	Name     string `json:"name"`               // e.g. "test", "build"
-	Cmdline  string `json:"cmdline"`            // e.g. "npm run test"
-	Source   string `json:"source"`             // file that defines it
-	Purpose  string `json:"purpose,omitempty"`  // build | test | lint | format | dev | run | other
+	Name     string `json:"name"`                // e.g. "test", "build"
+	Cmdline  string `json:"cmdline"`             // e.g. "npm run test"
+	Source   string `json:"source"`              // file that defines it
+	Purpose  string `json:"purpose,omitempty"`   // build | test | lint | format | dev | run | other
 	IsScript bool   `json:"is_script,omitempty"` // true for npm/poetry-style named scripts
 }
 
@@ -22,7 +22,7 @@ type ToolchainFile struct {
 
 // MonorepoInfo describes a detected multi-package layout.
 type MonorepoInfo struct {
-	Kind     string   `json:"kind"`   // npm-workspaces | pnpm-workspace | bun-workspaces | go-workspace | cargo-workspace | turborepo | nx
+	Kind     string   `json:"kind"` // npm-workspaces | pnpm-workspace | bun-workspaces | go-workspace | cargo-workspace | turborepo | nx
 	Manifest string   `json:"manifest"`
 	Packages []string `json:"packages"`
 }
@@ -36,29 +36,29 @@ type Framework struct {
 
 // AgentFile is an existing agent-instruction file in the repo.
 type AgentFile struct {
-	Path    string `json:"path"`
-	Tool    string `json:"tool"` // agents | claude | gemini | cursor | copilot | windsurf | cline | aider
-	Bytes   int    `json:"bytes"`
-	HasRef  bool   `json:"has_ref"` // references AGENTS.md (e.g. "@AGENTS.md" import)
+	Path   string `json:"path"`
+	Tool   string `json:"tool"` // agents | claude | gemini | cursor | copilot | windsurf | cline | aider
+	Bytes  int    `json:"bytes"`
+	HasRef bool   `json:"has_ref"` // references AGENTS.md (e.g. "@AGENTS.md" import)
 }
 
 // Facts is the result of analyzing a repository.
 type Facts struct {
-	Root          string          `json:"root"`
-	Languages     []string        `json:"languages"`
-	PackageMgrs   []string        `json:"package_managers"` // primary first
-	Frameworks    []Framework     `json:"frameworks"`
-	Scripts       []Command       `json:"scripts"`
-	Monorepo      *MonorepoInfo   `json:"monorepo,omitempty"`
-	Linters       []string        `json:"linters"`
-	Formatters    []string        `json:"formatters"`
-	TestFrameworks []string       `json:"test_frameworks"`
-	CICommands    []string        `json:"ci_commands"`
-	Docker        bool            `json:"docker"`
-	AgentFiles    []AgentFile     `json:"agent_files"`
-	ConfigFiles   []ToolchainFile `json:"config_files"`
-	Manifests     []string        `json:"manifests"` // files that make staleness checks meaningful
-	Warnings      []string        `json:"warnings"`
+	Root           string          `json:"root"`
+	Languages      []string        `json:"languages"`
+	PackageMgrs    []string        `json:"package_managers"` // primary first
+	Frameworks     []Framework     `json:"frameworks"`
+	Scripts        []Command       `json:"scripts"`
+	Monorepo       *MonorepoInfo   `json:"monorepo,omitempty"`
+	Linters        []string        `json:"linters"`
+	Formatters     []string        `json:"formatters"`
+	TestFrameworks []string        `json:"test_frameworks"`
+	CICommands     []string        `json:"ci_commands"`
+	Docker         bool            `json:"docker"`
+	AgentFiles     []AgentFile     `json:"agent_files"`
+	ConfigFiles    []ToolchainFile `json:"config_files"`
+	Manifests      []string        `json:"manifests"` // files that make staleness checks meaningful
+	Warnings       []string        `json:"warnings"`
 }
 
 // Has reports whether the language was detected.
