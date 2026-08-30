@@ -1,0 +1,35 @@
+name: npm publish
+
+# Publishes the npm distribution on every version tag once NPM_TOKEN is
+# configured (repo Settings → Secrets → Actions). Without the secret this
+# job skips, and releases continue to work via the binary tarballs.
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+  id-token: write # npm provenance
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          registry-url: 'https://registry.npmjs.org'
+      - name: Assemble distribution from checksummed release
+        run: bash scripts/build-npm.sh "${GITHUB_REF_NAME#v}"
+      - name: Publish platform packages, then main
+        if: ${{ secrets.NPM_TOKEN != '' }}
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          for d in agentsmd-darwin-arm64 agentsmd-darwin-amd64 \
+                   agentsmd-linux-arm64 agentsmd-linux-amd64 \
+                   agentsmd-windows-amd64 agentsmd-windows-arm64; do
+            npm publish "npm/dist/$d" --access public --provenance
+          done
+          npm publish "npm/dist/agentsmd" --access public --provenance
