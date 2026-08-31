@@ -4,6 +4,18 @@ All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/) and the
 project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.2.2] - 2026-08-31 (npm only)
+
+npm distribution is live: `npm install -g @momo792/agentsmd`.
+
+- Main package `@momo792/agentsmd` + six platform packages
+  (`agentsmd-{darwin,linux,windows}-{arm64,amd64}`), built from the
+  checksummed release tarballs by `scripts/build-npm.sh`.
+- Shim fix: resolve the platform binary across nested (scoped) and flat
+  (unscoped) install layouts.
+- The unscoped `agentsmd` name is blocked by npm's typosquat protection
+  (`agents-md` exists); a support request may unlock it later.
+
 ## [0.2.1] - 2026-08-30
 
 Review-round fixes.

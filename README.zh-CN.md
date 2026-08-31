@@ -49,7 +49,7 @@ go install github.com/youwei792/agentsmd@latest
 brew install youwei792/tap/agentsmd
 
 # npm（全局安装）
-npm install -g agentsmd
+npm install -g @momo792/agentsmd
 
 # 或到 Releases 下载二进制（linux/darwin/windows，amd64/arm64）
 ```
@@ -215,7 +215,7 @@ CI 会在任何 Agent 注意到之前先变红。
 - [x] 组织模式：`agentsmd org <gh-org>` 跨仓库健康报告（v0.2.0）
 - [ ] `--fix` 安全自动修复（死链 → 相近匹配）
 - [ ] pre-commit 钩子：manifest 变更时自动检查
-- [x] npm 分发（esbuild 式平台包；`scripts/build-npm.sh 0.2.0` 组装——发布待 npm 凭证）
+- [x] npm 分发已上线：`npm install -g @momo792/agentsmd`（esbuild 式平台包；无作用域的 `agentsmd` 名字被 npm 防typosquat机制拦截，后续可向 npm 官方申请解封）
 
 欢迎 PR——见 [CONTRIBUTING.md](CONTRIBUTING.md)。
 

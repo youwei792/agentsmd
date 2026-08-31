@@ -64,6 +64,7 @@ cat > "agentsmd/bin/agentsmd.js" <<'JS'
 #!/usr/bin/env node
 // agentsmd npm shim: resolve the platform binary and forward execution.
 const { spawnSync } = require("child_process");
+const fs = require("fs");
 const path = require("path");
 
 const plat = { darwin: "darwin", linux: "linux", win32: "windows" }[process.platform];
@@ -73,27 +74,28 @@ if (!plat || !arch) {
   process.exit(1);
 }
 const ext = process.platform === "win32" ? ".exe" : "";
-const bin = path.join(__dirname, "..", "..", `agentsmd-${plat}-${arch}`, "bin", `agentsmd${ext}`);
+const pkg = `agentsmd-${plat}-${arch}`;
+const bin = path.join(pkg, "bin", `agentsmd${ext}`);
 
-let result;
-try {
-  result = spawnSync(bin, process.argv.slice(2), { stdio: "inherit" });
-} catch (e) {
-  console.error(`agentsmd: failed to run ${bin}: ${e.message}`);
-  console.error("reinstall with: npm install agentsmd --force, or use: go install github.com/youwei792/agentsmd@latest");
+// The platform package lands in different places depending on whether this
+// package is installed scoped (nested node_modules) or unscoped (flat).
+const candidates = [
+  path.join(__dirname, "..", "node_modules", bin),                 // scoped main, nested deps
+  path.join(__dirname, "..", "..", pkg, "bin", `agentsmd${ext}`),  // unscoped main, flat
+  path.join(__dirname, "..", "..", "..", bin),                     // scoped main, flat sibling
+];
+const binPath = candidates.find((p) => fs.existsSync(p));
+if (!binPath) {
+  console.error("agentsmd: platform binary missing (reinstall with: npm install -g @momo792/agentsmd --force)");
   process.exit(1);
 }
-if (result.error) {
-  console.error(`agentsmd: platform binary missing (${result.error.message})`);
-  console.error("reinstall with: npm install agentsmd --force, or use: go install github.com/youwei792/agentsmd@latest");
-  process.exit(1);
-}
+const result = spawnSync(binPath, process.argv.slice(2), { stdio: "inherit" });
 process.exit(result.status ?? 0);
 JS
 
 cat > "agentsmd/package.json" <<JSON
 {
-  "name": "agentsmd",
+  "name": "@momo792/agentsmd",
   "version": "${VERSION}",
   "description": "CI for your AI agent's instructions: validate AGENTS.md, bridge CLAUDE.md. Zero-dependency Go binary.",
   "license": "MIT",
