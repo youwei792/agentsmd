@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/youwei792/agentsmd/internal/analyze"
+	"github.com/youwei792/agentsmd/internal/safeio"
 	"github.com/youwei792/agentsmd/internal/tokens"
 	"github.com/youwei792/agentsmd/internal/validate"
 )
@@ -49,7 +50,8 @@ type linter struct {
 // Run lints the agent instruction files of the repo at root.
 func Run(root string, facts *analyze.Facts) *Report {
 	l := &linter{root: root, facts: facts}
-	content := readIfExists(filepath.Join(root, "AGENTS.md"))
+	contentBytes, _ := safeio.ReadFileWithin(root, "AGENTS.md")
+	content := string(contentBytes)
 
 	if content == "" {
 		l.out = append(l.out, Finding{
@@ -384,14 +386,6 @@ func isVague(body string) bool {
 		}
 	}
 	return false
-}
-
-func readIfExists(path string) string {
-	b, err := os.ReadFile(path)
-	if err != nil {
-		return ""
-	}
-	return string(b)
 }
 
 func human(n int) string {

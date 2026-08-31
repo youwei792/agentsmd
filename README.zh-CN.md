@@ -72,7 +72,7 @@ agentsmd init
 agentsmd check
 ```
 
-解析你的 AGENTS.md（代码块**和**行内反引号），提取命令与文件引用，对照
+递归解析根目录和子目录中的 Agent 指令文件（代码块**和**行内反引号），提取命令与文件引用，对照
 仓库现实逐一核验：npm/pnpm/yarn 脚本、Makefile 目标、just 配方、
 `go test ./...` 路径、pytest 目标、compose 文件、requirements 文件、
 `./scripts/foo.sh`、死链——并给出相近匹配提示（`pnpm testt` → 你是想写
@@ -140,7 +140,7 @@ agentsmd doctor
 | `agentsmd org` | 舰队报告：一个组织/用户所有公开仓库的 AGENTS.md 健康度（需 `gh`） |
 | `agentsmd analyze` | 显示检测到的工具链事实（`--json`） |
 
-所有命令都支持 `--json` 输出，方便搭建你自己的看板。
+表格中标注了 `--json` 的审计和检查命令支持机器可读输出，方便搭建你自己的看板。
 
 ## 它能检测什么
 
@@ -184,7 +184,7 @@ Agent 指令文件是一个真实的攻击面：Agent 会逐字执行里面的�
    不存在的 `make test`。
 3. **零依赖。** 纯标准库 Go（约 5k 行）。`go build` 就是全部供应链。
    安全团队一个下午能读完每一行。
-4. **CI 优先。** 全命令支持退出码和 `--json`；仓库根目录*就是*那个
+4. **CI 优先。** 所有命令都有明确退出码，审计和检查命令支持 `--json`；仓库根目录*就是*那个
    GitHub Action。
 5. **你的文件你做主。** `sync` 的 copy 模式拒绝碰它不管理的文件；
    `init` 替换前先备份。

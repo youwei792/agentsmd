@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/youwei792/agentsmd/internal/safeio"
 )
 
 // agentFileSpecs maps tool name → candidate file paths (root-relative).
@@ -25,10 +27,11 @@ func analyzeAgentFiles(f *Facts) {
 	for _, spec := range agentFileSpecs {
 		for _, p := range spec.Paths {
 			full := filepath.Join(f.Root, p)
-			if !exists(full) {
+			info, err := os.Lstat(full)
+			if err != nil {
 				continue
 			}
-			if isDir(full) {
+			if info.IsDir() {
 				// e.g. .cursor/rules directory.
 				entries := listDir(full)
 				if len(entries) == 0 {
@@ -39,7 +42,11 @@ func analyzeAgentFiles(f *Facts) {
 				})
 				continue
 			}
-			content := readFile(full)
+			contentBytes, err := safeio.ReadFileWithin(f.Root, p)
+			if err != nil {
+				continue
+			}
+			content := string(contentBytes)
 			f.AgentFiles = append(f.AgentFiles, AgentFile{
 				Path:   p,
 				Tool:   spec.Tool,

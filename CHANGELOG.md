@@ -4,6 +4,33 @@ All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/) and the
 project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.2.3] - 2026-08-31
+
+### Fixed
+- `sync` refuses to follow managed-target symlinks, returns non-zero on write
+  errors, and makes `--mode copy` actually copy `AGENTS.md` idempotently.
+- The composite GitHub Action now maps macOS to `darwin`, uses the real
+  unversioned release asset names, installs `.exe` on Windows, verifies the
+  checksum in a temporary directory, and defaults to its pinned release (or
+  the latest release from a moving-major or unversioned ref).
+- Multiline GitHub Actions `run:` extraction stops at the next YAML key, so
+  generated shell blocks no longer contain `name:`, `uses:` or `with:` data.
+- Common value-taking flags for Go, pytest, just and Yarn no longer become
+  false missing-path/target findings; quoted values remain one argument.
+- JSON modes preserve command failure exit codes for lint, tokens, skills and
+  doctor.
+- Binaries installed with `go install module@version` report the embedded Go
+  module version instead of `dev` when no release linker flag is present.
+
+### Changed
+- `check` recursively validates scoped AGENTS.md/CLAUDE.md/GEMINI.md files,
+  resolves their relative references from the document directory, and refuses
+  to read instruction symlinks that resolve outside the repository.
+- `doctor` includes the complete reference-validation report and cannot show
+  a passing score when a sub-check has a hard failure.
+- npm publishing now waits for the release job in the same workflow and can
+  safely resume by skipping packages already published at that version.
+
 ## [0.2.2] - 2026-08-31 (npm only)
 
 npm distribution is live: `npm install -g @momo792/agentsmd`.

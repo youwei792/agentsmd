@@ -3,6 +3,7 @@ package analyze
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -201,6 +202,45 @@ func TestScriptCommandsMatchPackageManager(t *testing.T) {
 		}
 		if got := f.Script("test").Cmdline; got != c.want {
 			t.Errorf("%s repo: generated %q, want %q", c.pm, got, c.want)
+		}
+	}
+}
+
+func TestAnalyzeCIBlockStopsBeforeNextYAMLStep(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, root, "go.mod", "module example.com/app\n\ngo 1.24\n")
+	writeFile(t, root, ".github/workflows/ci.yml", `name: CI
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Test
+        run: |
+          go test ./...
+          if command -v go >/dev/null; then
+            go vet ./...
+          fi
+      - name: Upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: results
+      - run: go build ./...
+`)
+
+	f, err := Analyze(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"go test ./...", "go build ./..."} {
+		if !contains(f.CICommands, want) {
+			t.Errorf("expected CI command %q, got %v", want, f.CICommands)
+		}
+	}
+	for _, got := range f.CICommands {
+		for _, forbidden := range []string{"- name:", "uses:", "with:", "name: results"} {
+			if strings.Contains(got, forbidden) {
+				t.Errorf("YAML metadata leaked into CI commands: %q", got)
+			}
 		}
 	}
 }

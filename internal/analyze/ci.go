@@ -8,6 +8,24 @@ import (
 
 var ciRunRe = regexp.MustCompile(`(?m)^\s*(?:-\s+)?run:\s*(\|?.*)$`)
 
+func leadingIndent(s string) int {
+	for i, r := range s {
+		if r != ' ' && r != '\t' {
+			return i
+		}
+	}
+	return len(s)
+}
+
+func isYAMLBlockScalar(s string) bool {
+	switch s {
+	case "|", "|-", "|+", ">", ">-", ">+", "":
+		return true
+	default:
+		return false
+	}
+}
+
 func analyzeCI(f *Facts) {
 	// GitHub Actions.
 	for _, wf := range findFiles(f.Root, "*.yml", "*.yaml") {
@@ -35,18 +53,31 @@ func extractCIRuns(f *Facts, content string) {
 			continue
 		}
 		frag := strings.TrimSpace(m[1])
-		if strings.HasPrefix(frag, "|") || frag == ">" || frag == "" {
-			// Multiline block: take following indented lines.
+		if isYAMLBlockScalar(frag) {
+			// YAML block scalars end when indentation returns to the level of the
+			// `run:` key. Merely checking for "some indentation" leaks the next
+			// step's `uses:`, `with:` and other YAML fields into CI commands.
+			runIndent := leadingIndent(raw)
+			blockIndent := -1
 			for j := i + 1; j < len(lines); j++ {
 				next := lines[j]
 				if strings.TrimSpace(next) == "" {
 					continue
 				}
-				if strings.HasPrefix(next, " ") || strings.HasPrefix(next, "\t") {
-					f.CICommands = addUnique(f.CICommands, strings.TrimSpace(next))
-					continue
+				indent := leadingIndent(next)
+				if indent <= runIndent {
+					break
 				}
-				break
+				if blockIndent < 0 {
+					blockIndent = indent
+				}
+				if indent < blockIndent {
+					break
+				}
+				cmd := strings.TrimRight(next[blockIndent:], " \t\r")
+				if strings.TrimSpace(cmd) != "" {
+					f.CICommands = addUnique(f.CICommands, cmd)
+				}
 			}
 			continue
 		}

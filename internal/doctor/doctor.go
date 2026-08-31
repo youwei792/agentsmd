@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/youwei792/agentsmd/internal/analyze"
+	"github.com/youwei792/agentsmd/internal/checkcmd"
 	"github.com/youwei792/agentsmd/internal/lint"
 	"github.com/youwei792/agentsmd/internal/skills"
 	"github.com/youwei792/agentsmd/internal/syncmd"
@@ -17,14 +18,15 @@ import (
 
 // Report aggregates all sub-reports for --json output.
 type Report struct {
-	Root      string          `json:"root"`
-	Facts     *analyze.Facts  `json:"facts"`
-	Lint      *lint.Report    `json:"lint"`
-	Tokens    *tokens.Report  `json:"tokens"`
-	SyncState []syncmd.Action `json:"sync"`
-	Skills    []skills.Report `json:"skills,omitempty"`
-	Score     int             `json:"score"`
-	Grade     string          `json:"grade"`
+	Root      string           `json:"root"`
+	Facts     *analyze.Facts   `json:"facts"`
+	Check     *checkcmd.Report `json:"check"`
+	Lint      *lint.Report     `json:"lint"`
+	Tokens    *tokens.Report   `json:"tokens"`
+	SyncState []syncmd.Action  `json:"sync"`
+	Skills    []skills.Report  `json:"skills,omitempty"`
+	Score     int              `json:"score"`
+	Grade     string           `json:"grade"`
 }
 
 // Run executes the doctor command.
@@ -35,6 +37,11 @@ func Run(root string, jsonOut bool) int {
 		return 1
 	}
 	lr := lint.Run(root, facts)
+	cr, err := checkcmd.Inspect(root)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "agentsmd: %v\n", err)
+		return 1
+	}
 	tr := tokens.Measure(root)
 	sr := syncmd.Run(root, syncmd.Mode("import"), nil, true, "")
 	skillReps := skills.Run(root)
@@ -49,10 +56,14 @@ func Run(root string, jsonOut bool) int {
 	score := lr.Score
 	syncOK := 0
 	syncTotal := 0
+	syncErrors := 0
 	for _, a := range sr.Actions {
 		syncTotal++
 		if a.Status == "up-to-date" {
 			syncOK++
+		}
+		if a.Status == "error" {
+			syncErrors++
 		}
 	}
 	if syncTotal > 0 {
@@ -63,10 +74,22 @@ func Run(root string, jsonOut bool) int {
 	if score < 0 {
 		score = 0
 	}
+	hardFailure := cr.Errors > 0 || skillsBad > 0 || syncErrors > 0 || len(tr.Files) == 0
+	if hardFailure && score >= 60 {
+		// A health report must never print a passing score while one of the
+		// checks it claims to run has a hard failure.
+		score = 59
+	}
 
-	rep := &Report{Root: root, Facts: facts, Lint: lr, Tokens: tr, SyncState: sr.Actions, Skills: skillReps, Score: score, Grade: lint.Grade(score)}
+	rep := &Report{Root: root, Facts: facts, Check: cr, Lint: lr, Tokens: tr, SyncState: sr.Actions, Skills: skillReps, Score: score, Grade: lint.Grade(score)}
 	if jsonOut {
-		return printJSON(rep)
+		if code := printJSON(rep); code != 0 {
+			return code
+		}
+		if hardFailure {
+			return 1
+		}
+		return exitFor(score)
 	}
 
 	if len(tr.Files) == 0 {
@@ -110,6 +133,32 @@ func Run(root string, jsonOut bool) int {
 				fmt.Printf("    %s %-10s → %s %s\n", ui.Green("✓"), a.Tool, a.Path, ui.Dim("in sync"))
 			default:
 				fmt.Printf("    %s %-10s → %s %s\n", ui.Yellow("⚠"), a.Tool, a.Path, ui.Dim(pretty))
+			}
+		}
+	}
+
+	// Full reference validation, including scoped instruction files below
+	// the repository root.
+	fmt.Println()
+	fmt.Println(ui.Bold("  Reference validation"))
+	if len(cr.Documents) == 0 {
+		fmt.Println("    " + ui.Red("✗") + " no instruction documents found")
+	} else {
+		icon := ui.Green("✓")
+		if cr.Errors > 0 {
+			icon = ui.Red("✗")
+		} else if cr.Warnings > 0 {
+			icon = ui.Yellow("⚠")
+		}
+		fmt.Printf("    %s %d reference(s) across %d document(s): %d error(s), %d warning(s)\n",
+			icon, cr.Checked, len(cr.Documents), cr.Errors, cr.Warnings)
+		for _, doc := range cr.Documents {
+			for _, finding := range doc.Findings {
+				findingIcon := ui.Yellow("⚠")
+				if finding.Level == "error" {
+					findingIcon = ui.Red("✗")
+				}
+				fmt.Printf("        %s %s:%d %s\n", findingIcon, doc.Path, finding.Line, finding.Message)
 			}
 		}
 	}
@@ -160,6 +209,9 @@ func Run(root string, jsonOut bool) int {
 		fmt.Println("  " + ui.Dim("next steps: fill TODOs, fix broken references, then run `agentsmd sync`"))
 	}
 	fmt.Println()
+	if hardFailure {
+		return 1
+	}
 	return exitFor(score)
 }
 

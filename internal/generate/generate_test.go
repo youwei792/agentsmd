@@ -53,3 +53,31 @@ func TestGenerateMinimal(t *testing.T) {
 		t.Error("minimal mode still needs the header")
 	}
 }
+
+func TestGenerateDoesNotTurnWorkflowMetadataIntoShell(t *testing.T) {
+	root := t.TempDir()
+	os.MkdirAll(filepath.Join(root, ".github", "workflows"), 0o755)
+	os.WriteFile(filepath.Join(root, "go.mod"), []byte("module example.com/app\n\ngo 1.24\n"), 0o644)
+	os.WriteFile(filepath.Join(root, ".github", "workflows", "ci.yml"), []byte(`name: CI
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          go test ./...
+      - name: Release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+`), 0o644)
+
+	res := Build(analyzeRepo(t, root), Options{})
+	if !strings.Contains(res.Content, "go test ./...") {
+		t.Fatalf("expected grounded CI command, got:\n%s", res.Content)
+	}
+	for _, forbidden := range []string{"- name: Release", "uses: softprops", "generate_release_notes:"} {
+		if strings.Contains(res.Content, forbidden) {
+			t.Errorf("workflow metadata %q leaked into generated shell block", forbidden)
+		}
+	}
+}

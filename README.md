@@ -76,7 +76,7 @@ explicit `TODO` for you.
 agentsmd check
 ```
 
-Parses your AGENTS.md (fenced blocks **and** inline backticks), extracts
+Parses root and nested agent instruction files (fenced blocks **and** inline backticks), extracts
 commands and file references, and verifies them against reality: npm/pnpm/
 yarn scripts, Makefile targets, just recipes, `go test ./...` paths, pytest
 targets, compose files, requirements files, `./scripts/foo.sh`, dead file
@@ -144,7 +144,8 @@ agentsmd doctor
 | `agentsmd org` | Fleet report: AGENTS.md health of every public repo of an org/user (requires `gh`) |
 | `agentsmd analyze` | Show the detected toolchain facts (`--json`) |
 
-Every command emits JSON with `--json`, so you can build your own dashboards.
+Audit and inspection commands with a documented `--json` flag emit
+machine-readable output, so you can build your own dashboards.
 
 ## What it detects
 

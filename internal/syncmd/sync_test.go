@@ -76,6 +76,57 @@ func TestCopyRefusesUnmanagedFile(t *testing.T) {
 	}
 }
 
+func TestCopyUsesAgentsBodyAndIsIdempotent(t *testing.T) {
+	root := t.TempDir()
+	body := "# AGENTS.md\n\nbody\n"
+	os.WriteFile(filepath.Join(root, "AGENTS.md"), []byte(body), 0o644)
+
+	res := Run(root, ModeCopy, []string{"claude"}, false, body)
+	if !res.InSync || res.Actions[0].Status != "created" {
+		t.Fatalf("expected successful copy, got %+v", res)
+	}
+	b, err := os.ReadFile(filepath.Join(root, "CLAUDE.md"))
+	if err != nil || !strings.Contains(string(b), body) {
+		t.Fatalf("copy does not contain AGENTS.md body: %q, %v", b, err)
+	}
+
+	res = Run(root, ModeCopy, []string{"claude"}, false, body)
+	if res.Actions[0].Status != "up-to-date" {
+		t.Fatalf("second copy should be idempotent, got %+v", res.Actions[0])
+	}
+}
+
+func TestImportRefusesSymlinkWithoutTouchingTarget(t *testing.T) {
+	root := t.TempDir()
+	outside := filepath.Join(t.TempDir(), "outside.md")
+	os.WriteFile(filepath.Join(root, "AGENTS.md"), []byte("# AGENTS.md\n"), 0o644)
+	os.WriteFile(outside, []byte("do not change\n"), 0o644)
+	if err := os.Symlink(outside, filepath.Join(root, "CLAUDE.md")); err != nil {
+		t.Fatal(err)
+	}
+
+	res := Run(root, ModeImport, []string{"claude"}, false, "")
+	if res.InSync || len(res.Actions) != 1 || res.Actions[0].Status != "error" {
+		t.Fatalf("expected symlink refusal, got %+v", res)
+	}
+	b, err := os.ReadFile(outside)
+	if err != nil || string(b) != "do not change\n" {
+		t.Fatalf("external symlink target was changed: %q, %v", b, err)
+	}
+}
+
+func TestInvalidModeAndToolFail(t *testing.T) {
+	root := t.TempDir()
+	for _, res := range []*Result{
+		Run(root, Mode("unknown"), nil, false, ""),
+		Run(root, ModeImport, []string{"cursor"}, false, ""),
+	} {
+		if res.InSync || len(res.ExitErrors) == 0 {
+			t.Fatalf("invalid input should fail: %+v", res)
+		}
+	}
+}
+
 func TestSymlinkMode(t *testing.T) {
 	root := t.TempDir()
 	os.WriteFile(filepath.Join(root, "AGENTS.md"), []byte("# AGENTS.md\n"), 0o644)

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"strings"
 
 	"github.com/youwei792/agentsmd/internal/analyze"
@@ -72,7 +73,7 @@ func Run(args []string) int {
 	case "org":
 		return cmdOrg(rest)
 	case "version", "--version", "-v":
-		fmt.Printf("agentsmd %s\n", version)
+		fmt.Printf("agentsmd %s\n", reportedVersion())
 		return 0
 	case "help", "--help", "-h":
 		fmt.Println(usage)
@@ -81,6 +82,19 @@ func Run(args []string) int {
 		fmt.Fprintf(os.Stderr, "agentsmd: unknown command %q\n\n%s\n", cmd, usage)
 		return 2
 	}
+}
+
+func reportedVersion() string {
+	if version != "dev" {
+		return strings.TrimPrefix(version, "v")
+	}
+	if info, ok := debug.ReadBuildInfo(); ok {
+		moduleVersion := info.Main.Version
+		if moduleVersion != "" && moduleVersion != "(devel)" {
+			return strings.TrimPrefix(moduleVersion, "v")
+		}
+	}
+	return version
 }
 
 func cmdInit(args []string) int {
@@ -154,7 +168,10 @@ func cmdLint(args []string) int {
 	}
 	rep := lint.Run(root, facts)
 	if *jsonOut {
-		return printJSON(rep)
+		if code := printJSON(rep); code != 0 {
+			return code
+		}
+		return exitCodeFor(rep.Score, len(rep.Findings))
 	}
 	for _, f := range rep.Findings {
 		icon := ui.Yellow("⚠")
@@ -191,7 +208,13 @@ func cmdTokens(args []string) int {
 	root := resolvePath(fs.Arg(0))
 	rep := tokens.Measure(root)
 	if *jsonOut {
-		return printJSON(rep)
+		if code := printJSON(rep); code != 0 {
+			return code
+		}
+		if len(rep.Files) == 0 {
+			return 1
+		}
+		return 0
 	}
 	if len(rep.Files) == 0 {
 		fmt.Println(ui.Yellow("⚠") + " no agent instruction files found")
@@ -227,7 +250,15 @@ func cmdSync(args []string) int {
 			toolList = append(toolList, strings.TrimSpace(t))
 		}
 	}
-	res := syncmd.Run(root, syncmd.Mode(*mode), toolList, *checkOnly, "")
+	copyBody := ""
+	if syncmd.Mode(*mode) == syncmd.ModeCopy {
+		body, err := os.ReadFile(filepath.Join(root, "AGENTS.md"))
+		if err != nil {
+			return fatal(err)
+		}
+		copyBody = string(body)
+	}
+	res := syncmd.Run(root, syncmd.Mode(*mode), toolList, *checkOnly, copyBody)
 	pretty := strings.NewReplacer("would-create", "would create", "would-update", "would update")
 	for _, a := range res.Actions {
 		switch {
@@ -243,6 +274,12 @@ func cmdSync(args []string) int {
 				fmt.Printf("       %s\n", ui.Dim(a.Detail))
 			}
 		}
+	}
+	if len(res.ExitErrors) > 0 {
+		for _, msg := range res.ExitErrors {
+			fmt.Fprintln(os.Stderr, "agentsmd: "+msg)
+		}
+		return 1
 	}
 	if !res.InSync && *checkOnly {
 		fmt.Fprintln(os.Stderr, "\nagentsmd: sync is out of date")
@@ -322,14 +359,25 @@ func cmdSkills(args []string) int {
 
 	root := resolvePath(fs.Arg(0))
 	reports := skills.Run(root)
+	bad := 0
+	for _, r := range reports {
+		if !r.Valid {
+			bad++
+		}
+	}
 	if *jsonOut {
-		return printJSON(reports)
+		if code := printJSON(reports); code != 0 {
+			return code
+		}
+		if bad > 0 {
+			return 1
+		}
+		return 0
 	}
 	if len(reports) == 0 {
 		fmt.Println(ui.Dim("no SKILL.md bundles found (looked in .claude/skills/ and skills/)"))
 		return 0
 	}
-	bad := 0
 	fmt.Println(ui.Bold("Agent Skills:"))
 	for _, r := range reports {
 		icon := ui.Green("✓")

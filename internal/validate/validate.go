@@ -68,17 +68,24 @@ func NewEngine(root string, facts *analyze.Facts) *Engine {
 func (e *Engine) CheckDocument(file, content string) []Finding {
 	var out []Finding
 	_, cmds, paths := mdutil.Parse(file, content)
+	docDir := filepath.ToSlash(filepath.Dir(file))
+	if docDir == "." || !e.escapeFree(docDir) {
+		docDir = ""
+	}
 
 	for _, c := range cmds {
 		e.source = c.Source
-		e.subDir = ""
-		if c.Dir != "" && e.dirExists(c.Dir) {
-			e.subDir = c.Dir
+		e.subDir = docDir
+		if c.Dir != "" {
+			candidate := filepath.ToSlash(filepath.Join(docDir, c.Dir))
+			if e.repoDirExists(candidate) {
+				e.subDir = candidate
+			}
 		}
 		out = append(out, e.checkCommandSource(file, c.Line, c.Cmd, c.Source)...)
 	}
 	e.source = "fence"
-	e.subDir = ""
+	e.subDir = docDir
 	for _, p := range paths {
 		out = append(out, e.checkPathRef(p)...)
 	}
@@ -154,7 +161,7 @@ func (e *Engine) buildName() string {
 }
 
 func (e *Engine) checkSegment(file string, line int, full, seg string) []Finding {
-	fields := strings.Fields(seg)
+	fields := shellFields(seg)
 	if len(fields) == 0 {
 		return nil
 	}
@@ -311,11 +318,27 @@ func (e *Engine) checkYarnBun(runner string, fields []string, file string, line 
 	args := fields[1:]
 	// yarn --cwd <dir> <script>
 	for len(args) > 0 && strings.HasPrefix(args[0], "-") {
-		if (args[0] == "--cwd" || args[0] == "--dir") && len(args) >= 2 {
+		flag := args[0]
+		if strings.Contains(flag, "=") {
+			name, value, _ := strings.Cut(flag, "=")
+			if name == "--cwd" || name == "--dir" || name == "-C" {
+				if !e.dirExists(value) {
+					return []Finding{{File: file, Line: line, Level: Error, Command: full,
+						Message: runner + " --cwd directory " + quote(value) + " does not exist"}}
+				}
+			}
+			args = args[1:]
+			continue
+		}
+		if (flag == "--cwd" || flag == "--dir" || flag == "-C") && len(args) >= 2 {
 			if !e.dirExists(args[1]) {
 				return []Finding{{File: file, Line: line, Level: Error, Command: full,
 					Message: runner + " --cwd directory " + quote(args[1]) + " does not exist"}}
 			}
+			args = args[2:]
+			continue
+		}
+		if yarnValueFlags[flag] && len(args) >= 2 {
 			args = args[2:]
 			continue
 		}
@@ -337,6 +360,12 @@ func (e *Engine) checkYarnBun(runner string, fields []string, file string, line 
 	default:
 		return e.verifyScriptLoose(args[0], file, line, full, runner)
 	}
+}
+
+var yarnValueFlags = map[string]bool{
+	"--cache-folder": true, "--global-folder": true, "--modules-folder": true,
+	"--mutex": true, "--network-timeout": true, "--network-concurrency": true,
+	"--registry": true, "--use-yarnrc": true,
 }
 
 func (e *Engine) verifyScript(name string, file string, line int, full, runner string) []Finding {
@@ -549,8 +578,19 @@ func (e *Engine) checkJust(fields []string, file string, line int, full string) 
 		return nil
 	}
 	var out []Finding
+	skipNext := false
 	for _, a := range fields[1:] {
-		if strings.HasPrefix(a, "-") || strings.Contains(a, "=") {
+		if skipNext {
+			skipNext = false
+			continue
+		}
+		if strings.HasPrefix(a, "-") {
+			if justValueFlags[a] && !strings.Contains(a, "=") {
+				skipNext = true
+			}
+			continue
+		}
+		if strings.Contains(a, "=") {
 			continue
 		}
 		if _, ok := recipes[a]; !ok {
@@ -559,6 +599,12 @@ func (e *Engine) checkJust(fields []string, file string, line int, full string) 
 		}
 	}
 	return out
+}
+
+var justValueFlags = map[string]bool{
+	"-d": true, "--working-directory": true, "-f": true, "--justfile": true,
+	"--shell": true, "--shell-arg": true, "--chooser": true,
+	"--color": true, "--dump-format": true,
 }
 
 func (e *Engine) loadJust() map[string]string {
@@ -587,7 +633,18 @@ func (e *Engine) checkGo(fields []string, file string, line int, full string) []
 	if len(fields) < 2 {
 		return nil
 	}
-	sub := fields[1]
+	args := fields[1:]
+	for len(args) > 0 && strings.HasPrefix(args[0], "-") {
+		flag := args[0]
+		args = args[1:]
+		if (flag == "-C" || flag == "-modfile" || flag == "-overlay") && len(args) > 0 {
+			args = args[1:]
+		}
+	}
+	if len(args) == 0 {
+		return nil
+	}
+	sub := args[0]
 	valid := map[string]bool{
 		"build": true, "test": true, "run": true, "vet": true, "fmt": true,
 		"mod": true, "work": true, "install": true, "generate": true,
@@ -601,14 +658,14 @@ func (e *Engine) checkGo(fields []string, file string, line int, full string) []
 	// Validate package path arguments for test/build/vet/list.
 	if sub == "test" || sub == "build" || sub == "vet" || sub == "list" {
 		skipNext := false
-		for _, a := range fields[2:] {
+		for _, a := range args[1:] {
 			if skipNext {
 				skipNext = false
 				continue
 			}
 			if strings.HasPrefix(a, "-") {
 				// Flags that consume the next token: -o out, -C dir, ...
-				if a == "-o" || a == "-C" || a == "-tags" || a == "-mod" || a == "-ldflags" || a == "-coverpkg" {
+				if goValueFlags[a] && !strings.Contains(a, "=") {
 					skipNext = true
 				}
 				continue
@@ -624,7 +681,7 @@ func (e *Engine) checkGo(fields []string, file string, line int, full string) []
 		}
 	}
 	if sub == "run" || sub == "test" {
-		for _, a := range fields[2:] {
+		for _, a := range args[1:] {
 			if strings.HasSuffix(a, ".go") && !strings.HasPrefix(a, "-") {
 				if !e.relExists(a) {
 					out = append(out, Finding{File: file, Line: line, Level: Error, Command: full,
@@ -634,6 +691,21 @@ func (e *Engine) checkGo(fields []string, file string, line int, full string) []
 		}
 	}
 	return out
+}
+
+var goValueFlags = map[string]bool{
+	"-C": true, "-asmflags": true, "-buildmode": true, "-compiler": true,
+	"-covermode": true, "-coverpkg": true, "-coverprofile": true, "-cpu": true,
+	"-exec": true, "-gcflags": true, "-ldflags": true, "-mod": true,
+	"-modfile": true, "-o": true, "-overlay": true, "-p": true, "-pkgdir": true,
+	"-tags": true, "-toolexec": true, "-vet": true,
+	// go test flags whose value would otherwise look like a package path.
+	"-benchtime": true, "-blockprofile": true, "-blockprofilerate": true,
+	"-count": true, "-fuzz": true,
+	"-fuzzminimizetime": true, "-fuzztime": true, "-list": true,
+	"-memprofile": true, "-memprofilerate": true, "-mutexprofile": true,
+	"-mutexprofilefraction": true, "-outputdir": true, "-parallel": true,
+	"-run": true, "-shuffle": true, "-timeout": true, "-trace": true,
 }
 
 func (e *Engine) checkCargo(fields []string, file string, line int, full string) []Finding {
@@ -698,8 +770,16 @@ func (e *Engine) checkPython(fields []string, file string, line int, full string
 
 func (e *Engine) checkPytest(fields []string, file string, line int, full string) []Finding {
 	var out []Finding
+	skipNext := false
 	for _, a := range fields[1:] {
+		if skipNext {
+			skipNext = false
+			continue
+		}
 		if strings.HasPrefix(a, "-") {
+			if pytestValueFlags[a] && !strings.Contains(a, "=") {
+				skipNext = true
+			}
 			continue
 		}
 		if strings.Contains(a, "::") {
@@ -712,6 +792,15 @@ func (e *Engine) checkPytest(fields []string, file string, line int, full string
 		}
 	}
 	return out
+}
+
+var pytestValueFlags = map[string]bool{
+	"-k": true, "-m": true, "--basetemp": true, "--capture": true,
+	"--color": true, "--confcutdir": true, "--deselect": true,
+	"--durations": true, "--durations-min": true, "--ignore": true,
+	"--ignore-glob": true, "--import-mode": true, "--junitxml": true,
+	"--maxfail": true, "--override-ini": true, "--rootdir": true,
+	"--tb": true, "--verbosity": true,
 }
 
 func (e *Engine) checkDocker(fields []string, file string, line int, full string) []Finding {
@@ -759,11 +848,13 @@ func hasGlob(p string) bool {
 }
 
 func (e *Engine) globHasMatches(p string) bool {
-	if !e.withinRoot(p) {
-		return false
+	for _, rel := range e.relativeCandidates(p) {
+		matches, err := filepath.Glob(filepath.Join(e.Root, filepath.FromSlash(rel)))
+		if err == nil && len(matches) > 0 {
+			return true
+		}
 	}
-	matches, err := filepath.Glob(filepath.Join(e.Root, p))
-	return err == nil && len(matches) > 0
+	return false
 }
 
 // buildDirs are directories that only exist after install/build; docs may
@@ -841,22 +932,55 @@ func (e *Engine) relExists(p string) bool {
 	if filepath.IsAbs(p) {
 		return false
 	}
-	if !e.withinRoot(p) {
-		return false // references outside the repo are never checked
+	for _, rel := range e.relativeCandidates(p) {
+		if _, err := os.Stat(filepath.Join(e.Root, filepath.FromSlash(rel))); err == nil {
+			return true
+		}
 	}
-	_, err := os.Stat(filepath.Join(e.Root, p))
-	return err == nil
+	return false
 }
 
 func (e *Engine) dirExists(p string) bool {
 	if filepath.IsAbs(p) {
 		return false
 	}
-	if !e.withinRoot(p) {
+	for _, rel := range e.relativeCandidates(p) {
+		fi, err := os.Stat(filepath.Join(e.Root, filepath.FromSlash(rel)))
+		if err == nil && fi.IsDir() {
+			return true
+		}
+	}
+	return false
+}
+
+func (e *Engine) repoDirExists(rel string) bool {
+	if !e.escapeFree(rel) {
 		return false
 	}
-	fi, err := os.Stat(filepath.Join(e.Root, p))
+	fi, err := os.Stat(filepath.Join(e.Root, filepath.FromSlash(rel)))
 	return err == nil && fi.IsDir()
+}
+
+// relativeCandidates resolves references from the instruction file's
+// directory/active cd target first, then from the repository root. The
+// fallback keeps validation conservative for docs that explicitly state
+// their commands run from the repository root.
+func (e *Engine) relativeCandidates(p string) []string {
+	if !e.escapeFree(p) {
+		return nil
+	}
+	p = filepath.ToSlash(filepath.Clean(p))
+	var out []string
+	if e.subDir != "" && e.escapeFree(e.subDir) {
+		joined := filepath.ToSlash(filepath.Clean(filepath.Join(e.subDir, p)))
+		if e.escapeFree(joined) {
+			out = append(out, joined)
+		}
+	}
+	if len(out) == 0 || out[0] != p {
+		out = append(out, p)
+	}
+	return out
 }
 
 // withinRoot reports whether a repo-relative path stays inside the repo
@@ -879,6 +1003,56 @@ func looksLikeFilePath(p string) bool {
 		return false
 	}
 	return strings.Contains(p, "/") || strings.Contains(filepath.Ext(p), ".")
+}
+
+// shellFields is a deliberately small shell tokenizer. It keeps quoted flag
+// values together (for example `pytest -k "not slow"`) without attempting
+// expansion or execution.
+func shellFields(s string) []string {
+	var fields []string
+	var current strings.Builder
+	var quote byte
+	escaped := false
+	flush := func() {
+		if current.Len() > 0 {
+			fields = append(fields, current.String())
+			current.Reset()
+		}
+	}
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if escaped {
+			current.WriteByte(c)
+			escaped = false
+			continue
+		}
+		if c == '\\' && quote != '\'' {
+			escaped = true
+			continue
+		}
+		if quote != 0 {
+			if c == quote {
+				quote = 0
+			} else {
+				current.WriteByte(c)
+			}
+			continue
+		}
+		if c == '\'' || c == '"' {
+			quote = c
+			continue
+		}
+		if c == ' ' || c == '\t' || c == '\r' || c == '\n' {
+			flush()
+			continue
+		}
+		current.WriteByte(c)
+	}
+	if escaped {
+		current.WriteByte('\\')
+	}
+	flush()
+	return fields
 }
 
 func quote(s string) string { return "`" + s + "`" }

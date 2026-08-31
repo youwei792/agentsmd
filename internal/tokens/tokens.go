@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/youwei792/agentsmd/internal/safeio"
 )
 
 // FileReport is the token estimate for one file.
@@ -68,8 +70,7 @@ var agentFiles = []string{
 func Measure(root string) *Report {
 	r := &Report{}
 	add := func(rel string) {
-		full := filepath.Join(root, rel)
-		b, err := os.ReadFile(full)
+		b, err := safeio.ReadFileWithin(root, rel)
 		if err != nil || len(b) == 0 {
 			return
 		}

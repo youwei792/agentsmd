@@ -122,7 +122,7 @@ CI for your AI agent's instructions. See the
 [full documentation](https://github.com/youwei792/agentsmd#readme).
 
 \`\`\`bash
-npm install -g agentsmd
+npm install -g @momo792/agentsmd
 agentsmd doctor
 \`\`\`
 MD

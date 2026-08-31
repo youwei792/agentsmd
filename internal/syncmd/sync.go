@@ -58,6 +58,18 @@ func Run(root string, mode Mode, tools []string, checkOnly bool, copyBody string
 	if mode == "" {
 		mode = ModeImport
 	}
+	if mode != ModeImport && mode != ModeCopy && mode != ModeSymlink {
+		res.InSync = false
+		res.ExitErrors = []string{fmt.Sprintf("invalid sync mode %q (want import, copy, or symlink)", mode)}
+		return res
+	}
+	for _, tool := range tools {
+		if tool != "claude" && tool != "gemini" {
+			res.InSync = false
+			res.ExitErrors = []string{fmt.Sprintf("unknown sync tool %q (want claude or gemini)", tool)}
+			return res
+		}
+	}
 
 	for _, t := range Targets() {
 		if len(tools) > 0 && !contains(tools, t.Tool) {
@@ -68,8 +80,11 @@ func Run(root string, mode Mode, tools []string, checkOnly bool, copyBody string
 	}
 
 	for _, a := range res.Actions {
-		if strings.HasPrefix(a.Status, "would-") {
+		if strings.HasPrefix(a.Status, "would-") || a.Status == "error" {
 			res.InSync = false
+			if a.Status == "error" {
+				res.ExitErrors = append(res.ExitErrors, a.Detail)
+			}
 		}
 	}
 	return res
@@ -77,6 +92,13 @@ func Run(root string, mode Mode, tools []string, checkOnly bool, copyBody string
 
 func syncTarget(root string, t Target, mode Mode, checkOnly bool, copyBody string) []Action {
 	full := filepath.Join(root, t.Path)
+	if mode == ModeSymlink {
+		return syncSymlink(t, full, checkOnly)
+	}
+	if fi, err := os.Lstat(full); err == nil && fi.Mode()&os.ModeSymlink != 0 {
+		return []Action{{Tool: t.Tool, Path: t.Path, Status: "error", Mode: string(mode),
+			Detail: fmt.Sprintf("%s is a symlink; refusing to follow or overwrite it", t.Path)}}
+	}
 	existing := readIfExists(full)
 
 	switch mode {
@@ -84,8 +106,6 @@ func syncTarget(root string, t Target, mode Mode, checkOnly bool, copyBody strin
 		return syncImport(t, full, existing, checkOnly)
 	case ModeCopy:
 		return syncCopy(t, full, existing, checkOnly, copyBody)
-	case ModeSymlink:
-		return syncSymlink(t, full, existing, checkOnly, root)
 	}
 	return nil
 }
@@ -150,7 +170,8 @@ func syncCopy(t Target, full, existing string, checkOnly bool, body string) []Ac
 		return []Action{{Tool: t.Tool, Path: t.Path, Status: "error", Detail: "no AGENTS.md content provided", Mode: "copy"}}
 	}
 	managed := strings.HasPrefix(existing, "<!-- managed by agentsmd")
-	if strings.TrimSpace(existing) == strings.TrimSpace(body) {
+	expected := header + "\n\n" + body
+	if strings.TrimSpace(existing) == strings.TrimSpace(expected) {
 		return []Action{{Tool: t.Tool, Path: t.Path, Status: "up-to-date", Mode: "copy"}}
 	}
 	status := "created"
@@ -168,16 +189,17 @@ func syncCopy(t Target, full, existing string, checkOnly bool, body string) []Ac
 			status = "would-update"
 		}
 	} else {
-		content := header + "\n\n" + body
-		if err := os.WriteFile(full, []byte(content), 0o644); err != nil {
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			return []Action{{Tool: t.Tool, Path: t.Path, Status: "error", Detail: err.Error(), Mode: "copy"}}
+		}
+		if err := os.WriteFile(full, []byte(expected), 0o644); err != nil {
 			return []Action{{Tool: t.Tool, Path: t.Path, Status: "error", Detail: err.Error(), Mode: "copy"}}
 		}
 	}
 	return []Action{{Tool: t.Tool, Path: t.Path, Status: status, Mode: "copy"}}
 }
 
-func syncSymlink(t Target, full, existing string, checkOnly bool, root string) []Action {
-	agentsPath := filepath.Join(root, "AGENTS.md")
+func syncSymlink(t Target, full string, checkOnly bool) []Action {
 	if fi, err := os.Lstat(full); err == nil {
 		if fi.Mode()&os.ModeSymlink != 0 {
 			dest, err := os.Readlink(full)
@@ -195,7 +217,6 @@ func syncSymlink(t Target, full, existing string, checkOnly bool, root string) [
 	if err := os.Symlink("AGENTS.md", full); err != nil {
 		return []Action{{Tool: t.Tool, Path: t.Path, Status: "error", Detail: err.Error(), Mode: "symlink"}}
 	}
-	_ = agentsPath
 	return []Action{{Tool: t.Tool, Path: t.Path, Status: "created", Mode: "symlink"}}
 }
 

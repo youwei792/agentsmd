@@ -26,6 +26,10 @@ jobs:
         run: go vet ./...
       - name: Test
         run: go test -race ./...
+      - name: Composite Action smoke test
+        uses: ./
+        with:
+          version: v0.2.1
 
   dogfood:
     name: agentsmd on itself
@@ -44,7 +48,7 @@ jobs:
   release:
     name: Release
     needs: [test]
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: startsWith(github.ref, 'refs/tags/v') && contains(github.ref_name, '.')
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -77,6 +81,46 @@ jobs:
           tag_name: ${{ env.VERSION }}
           name: ${{ env.VERSION }}
           generate_release_notes: true
+          make_latest: true
           files: |
             dist/*.tar.gz
             dist/checksums.txt
+
+  publish-npm:
+    name: Publish npm distribution
+    needs: [release]
+    if: startsWith(github.ref, 'refs/tags/v') && contains(github.ref_name, '.')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          registry-url: 'https://registry.npmjs.org'
+      - name: Assemble and publish platform packages, then main
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          if [ -z "${NODE_AUTH_TOKEN:-}" ]; then
+            echo "NPM_TOKEN secret not configured; skipping npm publish."
+            exit 0
+          fi
+          VERSION="${GITHUB_REF_NAME#v}"
+          bash scripts/build-npm.sh "$VERSION"
+          for name in agentsmd-darwin-arm64 agentsmd-darwin-amd64 \
+                      agentsmd-linux-arm64 agentsmd-linux-amd64 \
+                      agentsmd-windows-amd64 agentsmd-windows-arm64; do
+            if npm view "${name}@${VERSION}" version >/dev/null 2>&1; then
+              echo "${name}@${VERSION} already published; skipping"
+            else
+              npm publish "npm/dist/$name" --access public --provenance
+            fi
+          done
+          if npm view "@momo792/agentsmd@${VERSION}" version >/dev/null 2>&1; then
+            echo "@momo792/agentsmd@${VERSION} already published; skipping"
+          else
+            npm publish npm/dist/agentsmd --access public --provenance
+          fi

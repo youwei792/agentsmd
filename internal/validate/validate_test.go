@@ -185,3 +185,41 @@ func TestPlaceholderPathRefsSkipped(t *testing.T) {
 		t.Fatalf("placeholder path refs should be skipped, got %+v", out)
 	}
 }
+
+func TestNestedDocumentResolvesFromItsDirectory(t *testing.T) {
+	root, facts := fixtureRepo(t)
+	nested := filepath.Join(root, "packages", "widget")
+	os.MkdirAll(filepath.Join(nested, "docs"), 0o755)
+	os.WriteFile(filepath.Join(nested, "package.json"), []byte(`{
+		"name":"widget","scripts":{"check":"node check.js"}
+	}`), 0o644)
+	os.WriteFile(filepath.Join(nested, "check.js"), []byte("\n"), 0o644)
+	os.WriteFile(filepath.Join(nested, "docs", "guide.md"), []byte("guide\n"), 0o644)
+
+	eng := NewEngine(root, facts)
+	doc := "See `docs/guide.md`.\n\n```bash\nnpm run check\nnode check.js\n```\n"
+	if out := eng.CheckDocument("packages/widget/AGENTS.md", doc); len(out) != 0 {
+		t.Fatalf("nested references should resolve from the document directory, got %+v", out)
+	}
+}
+
+func TestCommonValueFlagsAreNotTreatedAsTargets(t *testing.T) {
+	root, facts := fixtureRepo(t)
+	os.MkdirAll(filepath.Join(root, "tests"), 0o755)
+	os.WriteFile(filepath.Join(root, "justfile"), []byte("test:\n\techo ok\n"), 0o644)
+	eng := NewEngine(root, facts)
+
+	commands := []string{
+		"go test -run TestWidget -count 1 -timeout 30s ./...",
+		`go test -run "Test Widget" ./...`,
+		"pytest -k widget -m integration --maxfail 1 tests",
+		`pytest -k "not slow" tests`,
+		"just --justfile justfile --working-directory . test",
+		"yarn --cache-folder .cache --network-timeout 10000 test",
+	}
+	for _, command := range commands {
+		if out := eng.CheckDocument("AGENTS.md", "```bash\n"+command+"\n```\n"); len(out) != 0 {
+			t.Errorf("valid command %q produced findings: %+v", command, out)
+		}
+	}
+}

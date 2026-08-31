@@ -23,40 +23,83 @@ inputs:
   version:
     description: 'agentsmd version to install'
     required: false
-    default: 'v0.1.0'
+    default: 'latest'
 
 runs:
   using: 'composite'
   steps:
     - shell: bash
       run: |
-        set -e
+        set -euo pipefail
+        resolve_latest() {
+          local latest_url
+          latest_url="$(curl -fsSL -o /dev/null -w '%{url_effective}' \
+            https://github.com/youwei792/agentsmd/releases/latest)"
+          printf '%s\n' "${latest_url##*/}"
+        }
         VERSION="${{ inputs.version }}"
-        OS="$(echo "${{ runner.os }}" | tr '[:upper:]' '[:lower:]')"
+        if [ "$VERSION" = "latest" ]; then
+          ACTION_REF="${{ github.action_ref }}"
+          if [[ "$ACTION_REF" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([-.].*)?$ ]]; then
+            VERSION="$ACTION_REF"
+          else
+            VERSION="$(resolve_latest)"
+          fi
+        fi
+        [[ "$VERSION" == v* ]] || VERSION="v$VERSION"
+        if [[ "$VERSION" =~ ^v[0-9]+$ ]]; then
+          VERSION="$(resolve_latest)"
+        fi
+        case "${{ runner.os }}" in
+          Linux) OS="linux" ;;
+          macOS) OS="darwin" ;;
+          Windows) OS="windows" ;;
+          *) echo "unsupported runner OS: ${{ runner.os }}" >&2; exit 1 ;;
+        esac
         ARCH="${{ runner.arch }}"
         case "$ARCH" in
           X64) ARCH="amd64" ;;
           ARM64) ARCH="arm64" ;;
+          *) echo "unsupported runner architecture: $ARCH" >&2; exit 1 ;;
         esac
-        TARBALL="agentsmd_${VERSION#v}_${OS}_${ARCH}.tar.gz"
+        TARBALL="agentsmd_${OS}_${ARCH}.tar.gz"
         URL="https://github.com/youwei792/agentsmd/releases/download/${VERSION}/${TARBALL}"
         echo "Installing agentsmd from $URL"
-        curl -fsSL -o agentsmd.tgz "$URL"
-        curl -fsSL -O "https://github.com/youwei792/agentsmd/releases/download/${VERSION}/checksums.txt"
+        INSTALL_DIR="$(mktemp -d)"
+        trap 'rm -rf "$INSTALL_DIR"' EXIT
+        curl -fsSL -o "$INSTALL_DIR/$TARBALL" "$URL"
+        curl -fsSL -o "$INSTALL_DIR/checksums.txt" \
+          "https://github.com/youwei792/agentsmd/releases/download/${VERSION}/checksums.txt"
         # Verify the tarball checksum before extracting/running anything.
-        LINE="$(grep "  ${TARBALL}\$" checksums.txt)"
+        LINE="$(grep "  ${TARBALL}\$" "$INSTALL_DIR/checksums.txt")"
         if [ -z "$LINE" ]; then echo "checksums.txt has no entry for ${TARBALL}" >&2; exit 1; fi
+        cd "$INSTALL_DIR"
         if command -v sha256sum >/dev/null 2>&1; then
           echo "$LINE" | sha256sum -c - >/dev/null
         else
           echo "$LINE" | shasum -a 256 -c - >/dev/null
         fi
-        tar -xzf agentsmd.tgz
-        find . -name agentsmd -type f | head -1 | xargs chmod +x
-        mv "$(find . -name agentsmd -type f | head -1)" agentsmd
-        ./agentsmd version
+        tar -xzf "$TARBALL"
+        EXT=""
+        [ "$OS" = "windows" ] && EXT=".exe"
+        BIN="$INSTALL_DIR/agentsmd_${OS}_${ARCH}/agentsmd${EXT}"
+        if [ ! -f "$BIN" ]; then echo "release archive does not contain $BIN" >&2; exit 1; fi
+        BIN_DIR="$RUNNER_TEMP/agentsmd-bin"
+        mkdir -p "$BIN_DIR"
+        cp "$BIN" "$BIN_DIR/agentsmd${EXT}"
+        [ "$OS" = "windows" ] || chmod +x "$BIN_DIR/agentsmd"
+        echo "$BIN_DIR" >> "$GITHUB_PATH"
+        "$BIN_DIR/agentsmd${EXT}" version
     - shell: bash
-      run: ./agentsmd check ${{ inputs.path }} ${{ inputs.strict == 'true' && '--strict' || '' }}
+      env:
+        CHECK_PATH: ${{ inputs.path }}
+        STRICT: ${{ inputs.strict }}
+      run: |
+        args=(check "$CHECK_PATH")
+        [ "$STRICT" = "true" ] && args+=(--strict)
+        agentsmd "${args[@]}"
     - shell: bash
       if: ${{ inputs.sync-check == 'true' }}
-      run: ./agentsmd sync --check ${{ inputs.path }}
+      env:
+        CHECK_PATH: ${{ inputs.path }}
+      run: agentsmd sync --check "$CHECK_PATH"
