@@ -22,11 +22,16 @@ jobs:
           registry-url: 'https://registry.npmjs.org'
       - name: Assemble distribution from checksummed release
         run: bash scripts/build-npm.sh "${GITHUB_REF_NAME#v}"
+      # NOTE: secrets context is not usable in if: conditionals; the guard
+      # lives in the script instead.
       - name: Publish platform packages, then main
-        if: ${{ secrets.NPM_TOKEN != '' }}
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
+          if [ -z "${NODE_AUTH_TOKEN:-}" ]; then
+            echo "NPM_TOKEN secret not configured; skipping npm publish (releases still work via binary tarballs)."
+            exit 0
+          fi
           for d in agentsmd-darwin-arm64 agentsmd-darwin-amd64 \
                    agentsmd-linux-arm64 agentsmd-linux-amd64 \
                    agentsmd-windows-amd64 agentsmd-windows-arm64; do
